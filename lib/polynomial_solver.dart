@@ -146,7 +146,7 @@ class _PolynomialSolverScreenState extends State<PolynomialSolverScreen> {
         title: const Text('Polynomial Solver'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.history),
+            icon: const Icon(Icons.history), tooltip: 'History',
             onPressed: () {
               Navigator.push(
                 context,
@@ -335,6 +335,13 @@ class PolynomialParser {
       throw FormatException("Number, 'x', or '(' expected at position $_pos");
     }
 
+    if (_peek == '^') {
+      _advance();
+      if (!_isDigit(_peek)) throw FormatException("Exponent value expected at pos $_pos");
+      final exponent = _parseInteger();
+      result = _power(result, exponent);
+    }
+
     return _multiply(result, {0: sign});
   }
 
@@ -373,6 +380,24 @@ class PolynomialParser {
     } catch (e) {
       throw FormatException("Invalid coefficient format: '$s'");
     }
+  }
+
+  static Map<int, Fraction> _power(Map<int, Fraction> base, int exp) {
+    if (exp < 0) throw FormatException("Negative exponents are not supported.");
+    if (exp == 0) return {0: Fraction(1, 1)};
+    if (exp == 1) return base;
+
+    Map<int, Fraction> result = {0: Fraction(1, 1)};
+    Map<int, Fraction> currentPower = Map.from(base);
+
+    while (exp > 0) {
+      if (exp % 2 == 1) {
+        result = _multiply(result, currentPower);
+      }
+      currentPower = _multiply(currentPower, currentPower);
+      exp ~/= 2;
+    }
+    return result;
   }
 
   static Map<int, Fraction> _add(Map<int, Fraction> p1, Map<int, Fraction> p2) {

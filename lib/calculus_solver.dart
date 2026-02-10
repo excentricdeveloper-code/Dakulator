@@ -73,12 +73,24 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
         _historyList.insert(
             0,
             HistoryItem(
-                "${isDifferentiation ? 'd/dx' : '∫'}($expression) dx = ${result.resultDisplay}"));
+                "${isDifferentiation ? 'd/dx' : '∫'}($expression) = ${result.resultDisplay}"));
         saveHistory('calculus_history', _historyList);
       });
     } catch (e) {
       setState(() {
-        _resultText = "Error: ${e.toString()}";
+        String errorMessage = e.toString();
+        if (e is UnsupportedError) {
+          errorMessage =
+              "The calculus engine does not support this expression yet.";
+          final message = e.message ?? "";
+          if (message.contains("is not supported")) {
+            errorMessage =
+                "Integration or differentiation for '${message.split("'")[1]}' is not supported.";
+          }
+        } else if (e is FormatException) {
+          errorMessage = "Invalid format: ${e.message}";
+        }
+        _resultText = "Error: $errorMessage";
         _stepsText = "";
       });
     }
@@ -182,12 +194,13 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
                 icon: const Icon(Icons.keyboard_hide),
                 onPressed: () => setState(() => _isKeyboardVisible = false))
           ]),
-          _buildRow(['sin', 'cos', 'tan', 'sec', 'ln', 'e']),
-          _buildRow(['7', '8', '9', '(', ')']),
-          _buildRow(['4', '5', '6', 'x', 'y']),
-          _buildRow(['1', '2', '3', '+', '-']),
-          _buildRow(['0', '.', '^', '/', 'del']),
-          _buildRow(['dx', '=']),
+          _buildRow(['sin', 'cos', 'tan', 'sec']),
+          _buildRow(['ln', 'e', '√', '^']),
+          _buildRow(['x', 'y', '(', ')']),
+          _buildRow(['7', '8', '9', '/']),
+          _buildRow(['4', '5', '6', '+']),
+          _buildRow(['1', '2', '3', '-']),
+          _buildRow(['0', '.', 'dx', 'del']),
         ],
       ),
     );
@@ -202,9 +215,14 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
                 child: Padding(
                   padding: const EdgeInsets.all(2),
                   child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
                     onPressed: () {
                       if (k == 'del') {
                         _onBackspace();
+                      } else if (k == '√') {
+                        _onKeyboardPress('sqrt(');
                       } else {
                         _onKeyboardPress(functionKeys.contains(k) ? '$k(' : k);
                       }
@@ -228,7 +246,10 @@ class CalculusResult {
 
 CalculusResult solveCalculus(String expression, bool isDifferentiation) {
   final steps = StringBuffer();
-  String processedExpression = expression.toLowerCase().replaceAll(' ', '');
+  String processedExpression = expression
+      .replaceAll(' ', '')
+      .replaceAll('√', 'sqrt')
+      .toLowerCase();
 
   if (processedExpression.contains('=')) {
     final parts = processedExpression.split('=');
@@ -247,13 +268,15 @@ CalculusResult solveCalculus(String expression, bool isDifferentiation) {
 
   steps.writeln("1. Parsed Expression: ${ast.toInfixString()}\n");
 
+  final variable = ast.getVariables().isNotEmpty ? ast.getVariables().first : 'x';
+
   Expression resultAST;
   if (isDifferentiation) {
-    steps.writeln("2. Differentiating with respect to x...\n");
-    resultAST = ast.differentiate('x', steps);
+    steps.writeln("2. Differentiating with respect to $variable...\n");
+    resultAST = ast.differentiate(variable, steps);
   } else {
-    steps.writeln("2. Integrating ∫${ast.toInfixString()} dx...\n");
-    resultAST = ast.integrate('x', steps);
+    steps.writeln("2. Integrating ∫${ast.toInfixString()} d$variable...\n");
+    resultAST = ast.integrate(variable, steps);
   }
 
   steps.writeln("\n3. Simplifying the result...");
@@ -271,6 +294,7 @@ abstract class Expression {
   Expression integrate(String varName, StringBuffer steps);
   Expression simplify();
   String toInfixString();
+  Set<String> getVariables();
 
   bool isZero() => false;
   bool isOne() => false;
@@ -289,7 +313,7 @@ class Constant extends Expression {
 
   @override
   Expression differentiate(String varName, StringBuffer steps) {
-    steps.writeln("   • d/dx[${toInfixString()}] = 0 (Derivative of a Constant)");
+    steps.writeln("   • d/d$varName[${toInfixString()}] = 0 (Derivative of a Constant)");
     return Constant(0);
   }
 
@@ -297,7 +321,7 @@ class Constant extends Expression {
   Expression integrate(String varName, StringBuffer steps) {
     final result = BinaryOp(this, Variable(varName), '*');
     steps.writeln(
-        "   • ∫${toInfixString()} dx = ${result.toInfixString()} (Integral of a Constant)");
+        "   • ∫${toInfixString()} d$varName = ${result.toInfixString()} (Integral of a Constant)");
     return result;
   }
 
@@ -307,6 +331,8 @@ class Constant extends Expression {
   bool isZero() => value == 0;
   @override
   bool isOne() => value == 1;
+  @override
+  Set<String> getVariables() => {};
 }
 
 class Variable extends Expression {
@@ -319,10 +345,10 @@ class Variable extends Expression {
   @override
   Expression differentiate(String varName, StringBuffer steps) {
     if (name == varName) {
-      steps.writeln("   • d/dx[$name] = 1 (Power Rule)");
+      steps.writeln("   • d/d$varName[$name] = 1 (Power Rule)");
       return Constant(1);
     } else {
-      steps.writeln("   • d/dx[$name] = 0 (Derivative of a constant variable)");
+      steps.writeln("   • d/d$varName[$name] = 0 (Derivative of a constant variable)");
       return Constant(0);
     }
   }
@@ -332,16 +358,18 @@ class Variable extends Expression {
     if (name == varName) {
       final result = BinaryOp(
           BinaryOp(Variable(varName), Constant(2), '^'), Constant(2), '/');
-      steps.writeln("   • ∫$name dx = ${result.toInfixString()} (Power Rule)");
+      steps.writeln("   • ∫$name d$varName = ${result.toInfixString()} (Power Rule)");
       return result;
     }
     final result = BinaryOp(this, Variable(varName), '*');
-    steps.writeln("   • ∫$name dx = ${result.toInfixString()} (Integral of a constant variable)");
+    steps.writeln("   • ∫$name d$varName = ${result.toInfixString()} (Integral of a constant variable)");
     return result;
   }
 
   @override
   Expression simplify() => this;
+  @override
+  Set<String> getVariables() => {name};
 }
 
 class BinaryOp extends Expression {
@@ -351,16 +379,10 @@ class BinaryOp extends Expression {
 
   int get _precedence {
     switch (op) {
-      case '+':
-      case '-':
-        return 1;
-      case '*':
-      case '/':
-        return 2;
-      case '^':
-        return 3;
-      default:
-        return 0;
+      case '+': case '-': return 1;
+      case '*': case '/': return 2;
+      case '^': return 3;
+      default: return 0;
     }
   }
 
@@ -377,9 +399,7 @@ class BinaryOp extends Expression {
     if (op == '-' && right is BinaryOp && (right as BinaryOp)._precedence == 1) {
       r = '($r)';
     }
-    if (op == '/') {
-        return '$l/$r';
-    }
+    if (op == '/') return '$l/$r';
     return '$l $op $r';
   }
 
@@ -388,21 +408,19 @@ class BinaryOp extends Expression {
     steps.writeln("   • Applying rule for operator '$op' to ${toInfixString()}");
     switch (op) {
       case '+':
-        steps.writeln("     - Sum Rule: d/dx(f+g) = f' + g'");
-        return BinaryOp(left.differentiate(varName, steps),
-            right.differentiate(varName, steps), '+');
+        steps.writeln("     - Sum Rule: d/d$varName(f+g) = f' + g'");
+        return BinaryOp(left.differentiate(varName, steps), right.differentiate(varName, steps), '+');
       case '-':
-        steps.writeln("     - Difference Rule: d/dx(f-g) = f' - g'");
-        return BinaryOp(left.differentiate(varName, steps),
-            right.differentiate(varName, steps), '-');
+        steps.writeln("     - Difference Rule: d/d$varName(f-g) = f' - g'");
+        return BinaryOp(left.differentiate(varName, steps), right.differentiate(varName, steps), '-');
       case '*':
-        steps.writeln("     - Product Rule: d/dx(f*g) = f'*g + f*g'");
+        steps.writeln("     - Product Rule: d/d$varName(f*g) = f'*g + f*g'");
         return BinaryOp(
             BinaryOp(left.differentiate(varName, steps), right, '*'),
             BinaryOp(left, right.differentiate(varName, steps), '*'),
             '+');
       case '/':
-        steps.writeln("     - Quotient Rule: d/dx(f/g) = (f'*g - f*g') / g^2");
+        steps.writeln("     - Quotient Rule: d/d$varName(f/g) = (f'*g - f*g') / g^2");
         return BinaryOp(
             BinaryOp(
                 BinaryOp(left.differentiate(varName, steps), right, '*'),
@@ -412,14 +430,13 @@ class BinaryOp extends Expression {
             '/');
       case '^':
         if (right is Constant) {
-          steps.writeln("     - Power & Chain Rule: d/dx(f^n) = n*f^(n-1)*f'");
+          steps.writeln("     - Power & Chain Rule: d/d$varName(f^n) = n*f^(n-1)*f'");
           double n = (right as Constant).value;
           Expression newPower = n == 2 ? left : BinaryOp(left, Constant(n - 1), '^');
-          return BinaryOp(BinaryOp(Constant(n), newPower, '*'),
-              left.differentiate(varName, steps), '*');
+          return BinaryOp(BinaryOp(Constant(n), newPower, '*'), left.differentiate(varName, steps), '*');
         }
         if (left is Constant) {
-            steps.writeln("     - Exponential & Chain Rule: d/dx(a^g) = a^g * ln(a) * g'");
+            steps.writeln("     - Exponential & Chain Rule: d/d$varName(a^g) = a^g * ln(a) * g'");
             return BinaryOp(
                 BinaryOp(this, FunctionCall('ln', left), '*'),
                 right.differentiate(varName, steps),
@@ -434,26 +451,29 @@ class BinaryOp extends Expression {
   Expression integrate(String varName, StringBuffer steps) {
     final originalInfix = toInfixString();
     final simplified = simplify();
-    if (!simplified.equals(this)) {
-        steps.writeln("   • Simplify: ∫$originalInfix dx = ∫${simplified.toInfixString()} dx");
+     if (!simplified.equals(this)) {
+        steps.writeln("   • Simplify: ∫$originalInfix d$varName = ∫${simplified.toInfixString()} d$varName");
         return simplified.integrate(varName, steps);
     }
 
-    // After this point, we assume the expression is simplified
     final sLeft = (simplified as BinaryOp).left;
     final sRight = (simplified as BinaryOp).right;
     final sOp = (simplified as BinaryOp).op;
 
     if (sOp == '+' || sOp == '-') {
       steps.writeln("   • Apply Linearity Rule:");
-      steps.writeln("     ∫(${sLeft.toInfixString()} $sOp ${sRight.toInfixString()}) dx = ∫${sLeft.toInfixString()} dx $sOp ∫${sRight.toInfixString()} dx");
-      return BinaryOp(sLeft.integrate(varName, steps),
-          sRight.integrate(varName, steps), sOp);
+      steps.writeln("     ∫(${sLeft.toInfixString()} $sOp ${sRight.toInfixString()}) d$varName = ∫${sLeft.toInfixString()} d$varName $sOp ∫${sRight.toInfixString()} d$varName");
+      return BinaryOp(sLeft.integrate(varName, steps), sRight.integrate(varName, steps), sOp);
     }
     if (sOp == '*' && sLeft is Constant) {
       steps.writeln("   • Apply Constant Multiple Rule:");
-      steps.writeln("     ∫${originalInfix} dx = ${sLeft.toInfixString()} * ∫${sRight.toInfixString()} dx");
+      steps.writeln("     ∫$originalInfix d$varName = ${sLeft.toInfixString()} * ∫${sRight.toInfixString()} d$varName");
       return BinaryOp(sLeft, sRight.integrate(varName, steps), '*');
+    }
+     if (sOp == '*' && sRight is Constant) {
+      steps.writeln("   • Apply Constant Multiple Rule:");
+      steps.writeln("     ∫$originalInfix d$varName = ${sRight.toInfixString()} * ∫${sLeft.toInfixString()} d$varName");
+      return BinaryOp(sRight, sLeft.integrate(varName, steps), '*');
     }
 
     if (sOp == '/') {
@@ -463,61 +483,39 @@ class BinaryOp extends Expression {
             steps.writeln("     - Let g(x) = ${sRight.toInfixString()}, so g'(x) = ${derivativeOfRight.toInfixString()}");
             return FunctionCall('ln', sRight);
         }
-    }
-
-    if (sOp == '*') {
-       if (sLeft is FunctionCall && sRight is FunctionCall) {
-        // sec(x)tan(x)
-        if (sLeft.name == 'sec' &&
-            sRight.name == 'tan' &&
-            sLeft.arg.equals(sRight.arg)) {
-          steps.writeln("   • Apply standard integral: ∫sec(u)tan(u)du = sec(u)");
-          return FunctionCall('sec', sLeft.arg);
+        if (sLeft is Constant && derivativeOfRight is Constant && !derivativeOfRight.isZero()){
+             final a = (sLeft).value / (derivativeOfRight).value;
+             steps.writeln("   • Apply Reverse Chain Rule (scaled): ∫(k*g'(x))/g(x) dx = k*ln|g(x)|");
+             steps.writeln("     - Let g(x) = ${sRight.toInfixString()}, g'(x) = ${derivativeOfRight.toInfixString()}");
+             steps.writeln("     - We have ∫(${sLeft.toInfixString()}/${sRight.toInfixString()}) dx = ∫((${a.toStringAsFixed(2)}*${derivativeOfRight.toInfixString()})/${sRight.toInfixString()}) dx");
+             return BinaryOp(Constant(a), FunctionCall('ln', sRight), '*');
         }
-      }
-      if(sRight is BinaryOp && sRight.op == '^' && sRight.right is Constant) {
-        Expression g = sRight.left;
-        Constant n = sRight.right as Constant;
-        Expression d_g = g.differentiate(varName, StringBuffer()).simplify();
-        if(sLeft.equals(d_g) && n.value != -1) {
-           final n_plus_1 = n.value + 1;
-           final result = BinaryOp(BinaryOp(g, Constant(n_plus_1), '^'), Constant(n_plus_1), '/');
-           steps.writeln("   • Apply Reverse Chain Rule: ∫g'(x) * [g(x)]^n dx = [g(x)]^(n+1)/(n+1)");
-           steps.writeln("     - Let g(x) = ${g.toInfixString()}, n = ${n.toInfixString()}, so g'(x) = ${d_g.toInfixString()}");
-           steps.writeln("     - Result: ${result.toInfixString()}");
-           return result;
-        }
+    }
+
+    if (sOp == '^' && sRight is Constant) {
+      final n = (sRight as Constant).value;
+      if (n != -1) {
+          final linearCoeffs = sLeft.getLinearCoefficients(varName);
+          if (linearCoeffs != null) {
+              final a = linearCoeffs.a;
+              final b = linearCoeffs.b;
+              if (a != 0) {
+                 final n_plus_1 = n + 1;
+                 final result = BinaryOp(
+                     BinaryOp(sLeft, Constant(n_plus_1), '^'),
+                     Constant(a * n_plus_1),
+                     '/'
+                 );
+                 steps.writeln("   • Apply Power Rule for Linear Argument: ∫(ax+b)^n dx = (ax+b)^(n+1)/(a*(n+1))");
+                 steps.writeln("     - Let u = ${sLeft.toInfixString()}, n = ${n.toStringAsFixed(2)}");
+                 steps.writeln("     - With a=$a, b=$b, the result is ${result.toInfixString()}");
+                 return result;
+              }
+          }
       }
     }
 
-    if (sOp == '^' &&
-        sLeft is Variable &&
-        (sLeft as Variable).name == varName &&
-        sRight is Constant) {
-      double n = (sRight as Constant).value;
-      if (n == -1) {
-        final result = FunctionCall('ln', Variable(varName));
-        steps.writeln("   • ∫x^-1 dx = ${result.toInfixString()} (Integral of 1/x)");
-        return result;
-      }
-      final n_plus_1 = n+1;
-      final result = BinaryOp(
-          BinaryOp(sLeft, Constant(n_plus_1), '^'), Constant(n_plus_1), '/');
-      steps.writeln("   • Apply Power Rule: ∫x^n dx = (x^(n+1))/(n+1)");
-      steps.writeln("     - ∫${originalInfix} dx = ${result.toInfixString()}");
-      return result;
-    }
-
-    if (sOp == '^' && sLeft is Constant && sRight is Variable && (sRight as Variable).name == varName) {
-        final result = BinaryOp(this, FunctionCall('ln', sLeft), '/');
-        steps.writeln("   • Apply Exponential Rule: ∫a^x dx = a^x / ln(a)");
-        steps.writeln("     - ∫${originalInfix} dx = ${result.toInfixString()}");
-        return result;
-    }
-
-
-    throw UnsupportedError(
-        "Integration for '$originalInfix' is not supported.");
+    throw UnsupportedError("Integration for '$originalInfix' is not supported.");
   }
 
   @override
@@ -532,7 +530,9 @@ class BinaryOp extends Expression {
         case '-': return Constant(l - r);
         case '*': return Constant(l * r);
         case '/': return r != 0 ? Constant(l / r) : this;
-        case '^': return Constant(math.pow(l, r).toDouble());
+        case '^':
+            if(l == 0 && r <= 0) return this; // Avoid 0^0 or 0^-n
+            return Constant(math.pow(l, r).toDouble());
       }
     }
     
@@ -542,20 +542,10 @@ class BinaryOp extends Expression {
         right = temp;
     }
 
-    if (op == '*' && left is BinaryOp && (left as BinaryOp).op == '/' && (left as BinaryOp).left.isOne()) {
-        return BinaryOp(right, (left as BinaryOp).right, '/').simplify();
-    }
-    if (op == '*' && right is BinaryOp && (right as BinaryOp).op == '/' && (right as BinaryOp).left.isOne()) {
-        return BinaryOp(left, (right as BinaryOp).right, '/').simplify();
-    }
-
     if (op == '*') {
       if (left.isZero() || right.isZero()) return Constant(0);
       if (left.isOne()) return right;
       if (right.isOne()) return left;
-      if (left is Constant && (left as Constant).value == -1) {
-        return BinaryOp(Constant(0), right, '-');
-      }
     }
     if (op == '+') {
       if (left.isZero()) return right;
@@ -572,8 +562,11 @@ class BinaryOp extends Expression {
     if (op == '^') {
       if (right.isOne()) return left;
       if (right.isZero()) return Constant(1);
-      if (left.isZero()) return Constant(0);
       if (left.isOne()) return Constant(1);
+      if (left.isZero()) return Constant(0);
+      if (left is BinaryOp && left == '^') {
+        return BinaryOp(left, BinaryOp(left, right, '*'), '^').simplify();
+      }
     }
     
     if(op == '*' && left.equals(right)) {
@@ -582,6 +575,8 @@ class BinaryOp extends Expression {
 
     return this;
   }
+   @override
+  Set<String> getVariables() => {...left.getVariables(), ...right.getVariables()};
 }
 
 class FunctionCall extends Expression {
@@ -595,7 +590,7 @@ class FunctionCall extends Expression {
   @override
   Expression differentiate(String varName, StringBuffer steps) {
     steps.writeln("   • Applying Chain Rule to ${toInfixString()}");
-    steps.writeln("     - d/dx[f(g)] = f'(g) * g'");
+    steps.writeln("     - d/d$varName[f(g)] = f'(g) * g'");
     Expression innerDerivative = arg.differentiate(varName, steps);
     Expression outerDerivative;
     switch (name) {
@@ -604,6 +599,7 @@ class FunctionCall extends Expression {
       case 'tan': outerDerivative = BinaryOp(FunctionCall('sec', arg), Constant(2), '^'); break;
       case 'sec': outerDerivative = BinaryOp(FunctionCall('sec', arg), FunctionCall('tan', arg), '*'); break;
       case 'ln': outerDerivative = BinaryOp(Constant(1), arg, '/'); break;
+      case 'sqrt': return BinaryOp(arg, Constant(0.5), '^').differentiate(varName, steps);
       default: throw UnsupportedError("Differentiation of function '$name' not supported");
     }
     return BinaryOp(outerDerivative, innerDerivative, '*');
@@ -611,14 +607,19 @@ class FunctionCall extends Expression {
 
   @override
   Expression integrate(String varName, StringBuffer steps) {
-    final argDerivative = arg.differentiate(varName, StringBuffer()).simplify();
-    if(argDerivative is Constant && !argDerivative.isZero()) {
-      steps.writeln("   • Apply U-Substitution for ∫${toInfixString()} dx, with u = ${arg.toInfixString()}");
-      steps.writeln("     - du = ${argDerivative.toInfixString()} dx  =>  dx = (1/${argDerivative.toInfixString()}) du");
-      steps.writeln("     - The integral becomes: ∫$name(u) * (1/${argDerivative.toInfixString()}) du");
-      steps.writeln("     - = (1/${argDerivative.toInfixString()}) * ∫$name(u) du");
+     final simplified = simplify();
+     if (!simplified.equals(this)) {
+        steps.writeln("   • Simplify: ∫${toInfixString()} d$varName = ∫${simplified.toInfixString()} d$varName");
+        return simplified.integrate(varName, steps);
+    }
+
+    final linearCoeffs = arg.getLinearCoefficients(varName);
+     if (linearCoeffs != null && linearCoeffs.a != 0) {
+      steps.writeln("   • Apply U-Substitution for ∫${toInfixString()} d$varName, with u = ${arg.toInfixString()}");
+      steps.writeln("     - du = ${linearCoeffs.a} d$varName  =>  d$varName = (1/${linearCoeffs.a}) du");
+      steps.writeln("     - The integral becomes: ∫$name(u) * (1/${linearCoeffs.a}) du");
       
-      final coefficient = BinaryOp(Constant(1), argDerivative, '/');
+      final coefficient = BinaryOp(Constant(1), Constant(linearCoeffs.a), '/');
       Expression integralOfF;
       String integralOfU;
 
@@ -631,14 +632,13 @@ class FunctionCall extends Expression {
           integralOfU = "sin(u)";
           integralOfF = FunctionCall('sin', arg);
           break;
-        case 'tan':
-           integralOfU = "ln|sec(u)|";
-           integralOfF = FunctionCall('ln', FunctionCall('sec', arg));
-           break;
         case 'sec':
-           integralOfU = "ln|sec(u)+tan(u)|";
-           integralOfF = FunctionCall('ln', BinaryOp(FunctionCall('sec', arg), FunctionCall('tan', arg), '+'));
-           break;
+           if (arg is Variable && (arg as Variable).name == varName) {
+              integralOfU = "ln|sec(u)+tan(u)|";
+              integralOfF = FunctionCall('ln', BinaryOp(FunctionCall('sec', arg), FunctionCall('tan', arg), '+'));
+              break;
+           }
+            throw UnsupportedError("Integration of function '$name' with complex argument not supported.");
         case 'ln':
           if (arg is Variable && (arg as Variable).name == varName) {
             steps.writeln("   • Apply Integration by Parts: ∫ln(x)dx = x*ln(x) - x");
@@ -654,16 +654,36 @@ class FunctionCall extends Expression {
       return result;
     }
 
-    throw UnsupportedError(
-        "Integration of '${toInfixString()}' is not supported. Argument must be linear (e.g., ax+b).");
+    throw UnsupportedError("Integration of '${toInfixString()}' is not supported. Argument must be linear (e.g., ax+b).");
   }
 
   @override
-  Expression simplify() => FunctionCall(name, arg.simplify());
+  Expression simplify() {
+    final simplifiedArg = arg.simplify();
+    if (name == 'sqrt') {
+      if (simplifiedArg is Constant) {
+        if ((simplifiedArg).value >= 0) {
+          final sqrtValue = math.sqrt((simplifiedArg).value);
+          return Constant(sqrtValue);
+        }
+      }
+      if (simplifiedArg is BinaryOp && simplifiedArg.op == '^') {
+        if (simplifiedArg.right is Constant) {
+           final exponent = (simplifiedArg.right as Constant).value;
+           if (exponent % 2 == 0) {
+             return BinaryOp(simplifiedArg.left, Constant(exponent / 2), '^');
+           }
+        }
+      }
+      return BinaryOp(simplifiedArg, Constant(0.5), '^');
+    }
+    return FunctionCall(name, simplifiedArg);
+  }
+   @override
+  Set<String> getVariables() => arg.getVariables();
 }
 
 // --- Expression Parser ---
-
 class ExpressionParser {
   final String expr;
   int pos = 0;
@@ -679,6 +699,7 @@ class ExpressionParser {
   }
 
   bool eat(int charToEat) {
+    while (ch == 32) { next(); }
     if (ch == charToEat) {
       next();
       return true;
@@ -690,8 +711,7 @@ class ExpressionParser {
     if(expr.isEmpty) throw FormatException("Empty expression");
     final expression = parseExpression();
     if (pos < expr.length) {
-      throw FormatException(
-          "Unexpected character at end of expression: ${expr.substring(pos)}");
+      throw FormatException("Unexpected character at end of expression: ${expr.substring(pos)}");
     }
     return expression;
   }
@@ -699,54 +719,38 @@ class ExpressionParser {
   Expression parseExpression() {
     var x = parseTerm();
     for (;;) {
-      if (eat(43)) { // +
-        x = BinaryOp(x, parseTerm(), '+');
-      } else if (eat(45)) { // -
-        x = BinaryOp(x, parseTerm(), '-');
-      } else {
-        return x;
-      }
+      if (eat(43)) { x = BinaryOp(x, parseTerm(), '+'); } 
+      else if (eat(45)) { x = BinaryOp(x, parseTerm(), '-'); } 
+      else { return x; }
     }
   }
 
   Expression parseTerm() {
     var x = parseFactor();
     for (;;) {
-       // Implicit multiplication
-      if (ch == 40 || (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57 && x is! Constant)) {
-        x = BinaryOp(x, parseFactor(), '*');
-      } else if (eat(42)) { // *
-        x = BinaryOp(x, parseFactor(), '*');
-      } else if (eat(47)) { // /
-        x = BinaryOp(x, parseFactor(), '/');
-      } else {
-        return x;
-      }
+       if (eat(42)) { x = BinaryOp(x, parseFactor(), '*');}
+       else if (eat(47)) { x = BinaryOp(x, parseFactor(), '/');}
+       else if (ch >= 97 && ch <= 122 || ch == 40 || ch >= 48 && ch <= 57 && (x is! Constant)) {
+         if (x is BinaryOp && (x.op == '+' || x.op == '-')) { return x;}
+         x = BinaryOp(x, parseFactor(), '*');
+       }
+       else { return x; }
     }
   }
 
   Expression parseFactor() {
-    if (eat(43)) { // unary plus
-      return parseFactor();
-    }
-    if (eat(45)) { // unary minus
+    if (eat(43)) { return parseFactor(); }
+    if (eat(45)) {
       final factor = parseFactor();
-      if (factor is Constant) {
-        return Constant(-factor.value);
-      }
+      if (factor is Constant) { return Constant(-factor.value); }
       return BinaryOp(Constant(0), factor, '-');
     }
-    var x = parsePower();
-     // Handle repeated factors e.g. (x+1)(x+2)
-    while(ch == 40 || (ch >= 97 && ch <= 122)) {
-      x = BinaryOp(x, parseFactor(), '*');
-    }
-    return x;
+    return parsePower();
   }
 
   Expression parsePower() {
     var x = parseBase();
-    if (eat(94)) { // ^ is right-associative
+    if (eat(94)) { 
       x = BinaryOp(x, parsePower(), '^');
     }
     return x;
@@ -759,14 +763,10 @@ class ExpressionParser {
       x = parseExpression();
       eat(41);
     } else if ((ch >= 48 && ch <= 57) || ch == 46) { // numbers
-      while ((ch >= 48 && ch <= 57) || ch == 46) {
-        next();
-      }
+      while ((ch >= 48 && ch <= 57) || ch == 46) { next(); }
       x = Constant(double.parse(expr.substring(startPos, pos)));
     } else if (ch >= 97 && ch <= 122) { // functions or variables
-      while ((ch >= 97 && ch <= 122)) {
-        next();
-      }
+      while ((ch >= 97 && ch <= 122)) { next(); }
       String word = expr.substring(startPos, pos);
       if (word == 'e') {
          x = Constant(math.e);
@@ -777,12 +777,59 @@ class ExpressionParser {
         x = Variable(word);
       }
     } else {
-      if (ch == -1) {
-        throw FormatException('Unexpected end of expression');
-      }
-      throw FormatException(
-          'Unexpected character: ${String.fromCharCode(ch)} at position $pos');
+      if (ch == -1) { throw FormatException('Unexpected end of expression');}
+      throw FormatException('Unexpected character: ${String.fromCharCode(ch)} at position $pos');
     }
     return x;
   }
+}
+
+class LinearCoefficients {
+    final double a; // coefficient of x
+    final double b; // constant term
+    LinearCoefficients(this.a, this.b);
+}
+
+
+extension ExpressionExtensions on Expression {
+    LinearCoefficients? getLinearCoefficients(String varName) {
+        final simplified = simplify();
+        if (simplified is Constant) {
+            return LinearCoefficients(0, simplified.value);
+        }
+        if (simplified is Variable) {
+            return simplified.name == varName ? LinearCoefficients(1, 0) : LinearCoefficients(0, 0);
+        }
+        if (simplified is BinaryOp) {
+            if (simplified.op == '+') {
+                final leftCoeffs = simplified.left.getLinearCoefficients(varName);
+                final rightCoeffs = simplified.right.getLinearCoefficients(varName);
+                if (leftCoeffs != null && rightCoeffs != null) {
+                    return LinearCoefficients(leftCoeffs.a + rightCoeffs.a, leftCoeffs.b + rightCoeffs.b);
+                }
+            }
+             if (simplified.op == '-') {
+                final leftCoeffs = simplified.left.getLinearCoefficients(varName);
+                final rightCoeffs = simplified.right.getLinearCoefficients(varName);
+                if (leftCoeffs != null && rightCoeffs != null) {
+                    return LinearCoefficients(leftCoeffs.a - rightCoeffs.a, leftCoeffs.b - rightCoeffs.b);
+                }
+            }
+            if (simplified.op == '*') {
+                if (simplified.left is Constant) {
+                    final rightCoeffs = simplified.right.getLinearCoefficients(varName);
+                    if (rightCoeffs != null) {
+                        return LinearCoefficients((simplified.left as Constant).value * rightCoeffs.a, (simplified.left as Constant).value * rightCoeffs.b);
+                    }
+                }
+                 if (simplified.right is Constant) {
+                    final leftCoeffs = simplified.left.getLinearCoefficients(varName);
+                    if (leftCoeffs != null) {
+                        return LinearCoefficients((simplified.right as Constant).value * leftCoeffs.a, (simplified.right as Constant).value * leftCoeffs.b);
+                    }
+                }
+            }
+        }
+        return null;
+    }
 }
