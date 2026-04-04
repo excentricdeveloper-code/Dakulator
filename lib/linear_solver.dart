@@ -153,7 +153,9 @@ class _LinearSolverScreenState extends State<LinearSolverScreen> {
       List<String> parts = coeff.split('/');
       return Fraction(int.parse(parts[0]), int.parse(parts[1]));
     }
-    return Fraction.fromDouble(double.parse(coeff));
+    double? val = double.tryParse(coeff);
+    if (val != null) return Fraction.fromDouble(val);
+    return Fraction(0, 1);
   }
 
    String _solveByElimination(Fraction a1, Fraction b1, Fraction c1, Fraction a2, Fraction b2, Fraction c2) {
@@ -167,12 +169,12 @@ class _LinearSolverScreenState extends State<LinearSolverScreen> {
     Fraction x = c1.multiply(b2).subtract(c2.multiply(b1)).divide(det);
     Fraction y = a1.multiply(c2).subtract(a2.multiply(c1)).divide(det);
 
-    String steps = "1. Given Equations:\n   Eq1: ${a1}x + ${b1}y = $c1\n   Eq2: ${a2}x + ${b2}y = $c2\n\n";
+    String steps = "1. Given Equations:\n   Eq1: (${a1})x + (${b1})y = $c1\n   Eq2: (${a2})x + (${b2})y = $c2\n\n";
     steps += "2. Use Cramer's Rule (Elimination):\n   x = (c₁b₂ - c₂b₁) / (a₁b₂ - a₂b₁) = $x\n";
     steps += "   y = (a₁c₂ - a₂c₁) / (a₁b₂ - a₂b₁) = $y\n";
 
     _stepsText = steps;
-    return "Solution: x = $x, y = $y";
+    return "Solution: x = ${formatRoot(x.doubleValue)}, y = ${formatRoot(y.doubleValue)}";
   }
 
   String _solveBySubstitution(Fraction a1, Fraction b1, Fraction c1, Fraction a2, Fraction b2, Fraction c2) {
@@ -188,26 +190,33 @@ class _LinearSolverScreenState extends State<LinearSolverScreen> {
       swapped = true;
     }
 
-    String steps = "1. Given Equations:\n   ${swapped ? 'Eq2' : 'Eq1'}: ${a1}x + ${b1}y = $c1\n   ${swapped ? 'Eq1' : 'Eq2'}: ${a2}x + ${b2}y = $c2\n\n";
-    steps += "2. Solve first equation for y:\n   y = ($c1 - ${a1}x) / $b1\n\n";
-    steps += "3. Substitute into second equation:\n   ${a2}x + $b2( ($c1 - ${a1}x) / $b1 ) = $c2\n\n";
+    String steps = "1. Given Equations:\n   ${swapped ? 'Eq2' : 'Eq1'}: (${a1})x + (${b1})y = $c1\n   ${swapped ? 'Eq1' : 'Eq2'}: (${a2})x + (${b2})y = $c2\n\n";
+    steps += "2. Solve first equation for y:\n   y = ($c1 - (${a1})x) / $b1\n\n";
+    steps += "3. Substitute into second equation:\n   (${a2})x + $b2( ($c1 - (${a1})x) / $b1 ) = $c2\n\n";
     
     Fraction det = a1.multiply(b2).subtract(a2.multiply(b1));
     if (det.numerator == 0) return "No unique solution";
     
-    Fraction x = c1.multiply(b2).subtract(c2.multiply(b1)).divide(det.negate());
+    Fraction x = c1.multiply(b2).subtract(c2.multiply(b1)).divide(det);
     Fraction y = c1.subtract(a1.multiply(x)).divide(b1);
 
     steps += "4. Solve for x: x = $x\n\n";
     steps += "5. Substitute x back to find y: y = $y";
 
     _stepsText = steps;
-    return "Solution: x = $x, y = $y";
+    return "Solution: x = ${formatRoot(x.doubleValue)}, y = ${formatRoot(y.doubleValue)}";
   }
 
   String _solveByGraphing(Fraction a1, Fraction b1, Fraction c1, Fraction a2, Fraction b2, Fraction c2) {
-    double det = a1.doubleValue() * b2.doubleValue() - a2.doubleValue() * b1.doubleValue();
-    _graphParams = [a1.doubleValue(), b1.doubleValue(), -c1.doubleValue(), a2.doubleValue(), b2.doubleValue(), -c2.doubleValue()];
+    double da1 = a1.doubleValue;
+    double db1 = b1.doubleValue;
+    double dc1 = c1.doubleValue;
+    double da2 = a2.doubleValue;
+    double db2 = b2.doubleValue;
+    double dc2 = c2.doubleValue;
+
+    double det = da1 * db2 - da2 * db1;
+    _graphParams = [da1, db1, dc1, da2, db2, dc2];
     
     if (det.abs() < 1e-9) {
       _intersection = null;
@@ -215,11 +224,11 @@ class _LinearSolverScreenState extends State<LinearSolverScreen> {
       return "No unique solution";
     }
 
-    double x = (c1.doubleValue() * b2.doubleValue() - c2.doubleValue() * b1.doubleValue()) / det;
-    double y = (a1.doubleValue() * c2.doubleValue() - a2.doubleValue() * c1.doubleValue()) / det;
+    double x = (dc1 * db2 - dc2 * db1) / det;
+    double y = (da1 * dc2 - da2 * dc1) / det;
     _intersection = Offset(x, y);
-    _stepsText = "The intersection point on the graph is (${x.toStringAsFixed(2)}, ${y.toStringAsFixed(2)}).";
-    return "Solution: (${x.toStringAsFixed(2)}, ${y.toStringAsFixed(2)})";
+    _stepsText = "The intersection point on the graph is (${formatRoot(x)}, ${formatRoot(y)}).";
+    return "Solution: x = ${formatRoot(x)}, y = ${formatRoot(y)}";
   }
 
   @override
@@ -238,7 +247,15 @@ class _LinearSolverScreenState extends State<LinearSolverScreen> {
             const SizedBox(height: 10),
             _buildEqField(_eq2Controller, 'Equation 2: dx + ey = f'),
             const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: ['Elimination', 'Substitution', 'Graphing'].map((m) => Row(mainAxisSize: MainAxisSize.min, children: [Radio<String>(value: m, groupValue: _solveMethod, onChanged: (v) => setState(() => _solveMethod = v!)), Text(m)])).toList()),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: ['Elimination', 'Substitution', 'Graphing'].map((m) => Row(mainAxisSize: MainAxisSize.min, children: [
+              Radio<String>(
+                value: m, 
+                groupValue: _solveMethod, 
+                onChanged: (v) => setState(() => _solveMethod = v!),
+                activeColor: Colors.orange,
+              ), 
+              Text(m)
+            ])).toList()),
             const SizedBox(height: 10),
             SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _solve, style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white), child: const Text('SOLVE'))),
             const SizedBox(height: 20),
@@ -361,7 +378,6 @@ class LinearGraphPainter extends CustomPainter {
 
   void _drawGridAndLabels(Canvas canvas, Size size, Offset origin, double scale, Paint gridPaint, TextStyle textStyle) {
       final step = _getGridStep(scale);
-      final format = step < 1 ? '0.0' : '0';
 
       // Vertical grid lines and X-axis labels
       for (int i = 0; ; i++) {
@@ -408,13 +424,13 @@ class LinearGraphPainter extends CustomPainter {
 
   void _drawGraphLine(Canvas canvas, Size size, double a, double b, double c, Offset origin, double scale, Paint paint) {
     Path path = Path();
-    if (b.abs() < 1e-9) { // Vertical line x = k
+    if (b.abs() < 1e-9) { // Vertical line ax = c => x = c/a
       if (a.abs() > 1e-9) {
         double x = c / a;
         double screenX = origin.dx + x * scale;
         path.moveTo(screenX, 0); path.lineTo(screenX, size.height);
       }
-    } else if (a.abs() < 1e-9) { // Horizontal line y = k
+    } else if (a.abs() < 1e-9) { // Horizontal line by = c => y = c/b
       double y = c / b;
       double screenY = origin.dy - y * scale;
       path.moveTo(0, screenY); path.lineTo(size.width, screenY);
@@ -435,7 +451,7 @@ class LinearGraphPainter extends CustomPainter {
   }
 
   void _drawIntersectionLabel(Canvas canvas, Size size, Offset screenPos, Offset realPos, TextStyle style) {
-    String label = '(${realPos.dx.toStringAsFixed(2)}, ${realPos.dy.toStringAsFixed(2)})';
+    String label = '(${formatRoot(realPos.dx)}, ${formatRoot(realPos.dy)})';
     final textPainter = TextPainter(text: TextSpan(text: label, style: style), textDirection: TextDirection.ltr)..layout();
     
     double x = screenPos.dx + 10;
