@@ -207,7 +207,7 @@ class _ScientificNotationSolverScreenState extends State<ScientificNotationSolve
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scientific Notation Calculator'),
+        title: const Text('Scientific Notation Solver'),
         actions: [
           IconButton(
             icon: const Icon(Icons.history),

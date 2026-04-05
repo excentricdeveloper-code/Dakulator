@@ -72,7 +72,7 @@ class _QuadraticSolverScreenState extends State<QuadraticSolverScreen> {
     });
 
     try {
-      final input = _equationController.text;
+      final input = _equationController.text.trim();
       if (input.isEmpty) {
         setState(() {
           _rootsText = '';
@@ -81,7 +81,6 @@ class _QuadraticSolverScreenState extends State<QuadraticSolverScreen> {
         return;
       }
 
-      // Offload the heavy computation to an isolate to prevent ANR
       final result = await compute(_solveQuadraticIsolate, {
         'equation': input,
         'method': _solveMethod,
@@ -98,7 +97,7 @@ class _QuadraticSolverScreenState extends State<QuadraticSolverScreen> {
     } catch (e) {
       setState(() {
         _rootsText = 'Error';
-        _stepsText = "An unexpected error occurred: ${e.toString()}";
+        _stepsText = "Invalid input: $e";
       });
     } finally {
       setState(() => _isSolving = false);
@@ -192,47 +191,89 @@ class _QuadraticSolverScreenState extends State<QuadraticSolverScreen> {
 Map<String, String> _solveQuadraticIsolate(Map<String, dynamic> params) {
   String equation = params['equation'];
   String method = params['method'];
-  
   try {
-    if (!equation.contains('=')) equation += '=0';
-    List<String> sides = equation.split('=');
+    String processed = equation.replaceAll(' ', '').toLowerCase();
+    if (!processed.contains('=')) processed += '=0';
+    List<String> sides = processed.split('=');
     if (sides.length != 2) return {'roots': 'Error', 'steps': 'Equation must have one equals sign.'};
 
-    _Polynomial leftPoly = _ExpressionParser(sides[0]).parse();
-    _Polynomial rightPoly = _ExpressionParser(sides[1]).parse();
-    _Polynomial finalPoly = leftPoly.subtract(rightPoly);
+    _RationalExpression leftExpr = _ExpressionParser(sides[0]).parse();
+    _RationalExpression rightExpr = _ExpressionParser(sides[1]).parse();
+    
+    // N1/D1 = N2/D2  =>  N1*D2 - N2*D1 = 0
+    _Polynomial finalPoly = leftExpr.numerator.multiply(rightExpr.denominator)
+        .subtract(rightExpr.numerator.multiply(leftExpr.denominator));
+    _Polynomial finalDenom = leftExpr.denominator.multiply(rightExpr.denominator);
 
     Fraction a = finalPoly.coefficients[2] ?? Fraction(0, 1);
     Fraction b = finalPoly.coefficients[1] ?? Fraction(0, 1);
     Fraction c = finalPoly.coefficients[0] ?? Fraction(0, 1);
     
     int maxDegree = 0;
-    if (finalPoly.coefficients.isNotEmpty) {
-      maxDegree = finalPoly.coefficients.keys.reduce(math.max);
-    }
+    if (finalPoly.coefficients.isNotEmpty) maxDegree = finalPoly.coefficients.keys.reduce(math.max);
 
     if (a.numerator == 0) {
-      return {
-        'roots': "Not a quadratic equation.",
-        'steps': "Equation simplifies to degree $maxDegree (must be 2)."
-      };
+      if (b.numerator != 0) {
+        double root = -c.doubleValue / b.doubleValue;
+        if (finalDenom.evaluate(root).abs() < 1e-9) {
+          return {'roots': "No solution", 'steps': "The potential solution x = ${formatRoot(root)} makes the denominator zero."};
+        }
+        return {'roots': "Roots: x = ${formatRoot(root)}", 'steps': "Equation simplifies to a linear form: (${b})x + ($c) = 0"};
+      }
+      return {'roots': "Not a quadratic equation.", 'steps': "Equation simplifies to degree $maxDegree (must be 2)."};
     }
 
+    Map<String, String> coreResult;
     if (method == 'Factorization') {
-      return _solveByFactorizationCore(a, b, c);
+      coreResult = _solveByFactorizationCore(a, b, c);
     } else {
-      return _solveByFormulaCore(a, b, c);
+      coreResult = _solveByFormulaCore(a, b, c);
     }
-  } catch (e) {
-    return {'roots': 'Error', 'steps': "Invalid equation format: $e"};
-  }
+
+    String rootsText = coreResult['roots']!;
+    if (rootsText.startsWith("Roots: ")) {
+      List<String> rootParts = rootsText.substring(7).split(', ');
+      List<String> validRoots = [];
+      for (var rp in rootParts) {
+        String cleanRp = rp.replaceFirst('x₁ = ', '').replaceFirst('x₂ = ', '').replaceFirst('x = ', '').trim();
+        // Extract numeric value from potentially complex formatting
+        double? val;
+        if (cleanRp.contains('(')) {
+           // Might be complex (real +/- imag i). Denominators in this app's scope are usually real.
+        } else {
+           // Try to parse double or evaluate fraction/radical if simple
+           val = double.tryParse(cleanRp);
+           // Handle common radical/fraction outputs from formatRoot
+           if (val == null && cleanRp.contains('/')) {
+             var parts = cleanRp.split('/');
+             var n = double.tryParse(parts[0]);
+             var d = double.tryParse(parts[1]);
+             if (n != null && d != null && d != 0) val = n / d;
+           }
+        }
+        
+        if (val != null) {
+          if (finalDenom.evaluate(val).abs() > 1e-7) {
+            validRoots.add(rp);
+          }
+        } else {
+          validRoots.add(rp);
+        }
+      }
+      if (validRoots.isEmpty) {
+        rootsText = "No valid roots found (all potential roots make the denominator zero).";
+      } else {
+        rootsText = "Roots: ${validRoots.join(', ')}";
+      }
+    }
+
+    return {'roots': rootsText, 'steps': coreResult['steps']!};
+  } catch (e) { return {'roots': 'Error', 'steps': "Parsing error: $e"}; }
 }
 
 Map<String, String> _solveByFormulaCore(Fraction a, Fraction b, Fraction c) {
   Fraction discriminant = b.multiply(b).subtract(Fraction(4, 1).multiply(a).multiply(c));
-  String steps = "1. Standard Form: ($a)x² + ($b)x + ($c) = 0\n";
-  steps += "2. Discriminant D = b²-4ac = ($b)² - 4($a)($c) = $discriminant\n";
-
+  String steps = "1. Standard Form: ($a)x² + ($b)x + ($c) = 0\n2. Discriminant D = b²-4ac = ($b)² - 4($a)($c) = $discriminant\n";
   Fraction twoA = a.multiply(Fraction(2, 1));
   String rootsText;
   if (discriminant.numerator >= 0) {
@@ -244,10 +285,8 @@ Map<String, String> _solveByFormulaCore(Fraction a, Fraction b, Fraction c) {
   } else {
     double real = b.negate().doubleValue / twoA.doubleValue;
     double imag = math.sqrt(-discriminant.doubleValue) / twoA.doubleValue;
-    
     ComplexResult cr1 = ComplexResult(realPart: formatRoot(real), imaginaryPart: formatRoot(imag), isComplex: true);
     ComplexResult cr2 = ComplexResult(realPart: formatRoot(real), imaginaryPart: formatRoot(-imag), isComplex: true);
-    
     rootsText = "Roots: $cr1, $cr2";
     steps += "3. D < 0. Roots are complex conjugates.\n   x = (-$b ± i√|D|) / 2a";
   }
@@ -262,46 +301,22 @@ Map<String, String> _solveByFactorizationCore(Fraction a, Fraction b, Fraction c
   int ac = intA * intC;
   int p = 0, q = 0;
   bool found = false;
-  
   int absAc = ac.abs();
-  // Limit factorization loop
-  if (absAc > 1000000) {
-    return _solveByFormulaCore(a, b, c)..['steps'] = "Note: Coefficients too large for efficient factorization. Using formula.\n\n" + _solveByFormulaCore(a, b, c)['steps']!;
-  }
-
+  if (absAc > 1000000) return _solveByFormulaCore(a, b, c)..['steps'] = "Note: Coefficients too large for factorization. Using formula.\n\n" + _solveByFormulaCore(a, b, c)['steps']!;
   for (int i = 1; i * i <= absAc; i++) {
     if (absAc % i == 0) {
-      int f1 = i;
-      int f2 = absAc ~/ i;
+      int f1 = i, f2 = absAc ~/ i;
       List<List<int>> pairs = [[f1, f2], [-f1, -f2], [f1, -f2], [-f1, f2]];
       for (var pair in pairs) {
-        if (pair[0] * pair[1] == ac && pair[0] + pair[1] == intB) {
-          p = pair[0]; q = pair[1]; found = true; break;
-        }
+        if (pair[0] * pair[1] == ac && pair[0] + pair[1] == intB) { p = pair[0]; q = pair[1]; found = true; break; }
       }
       if (found) break;
     }
   }
-  
-  if (!found) {
-    return {
-      'roots': "Not easily factorable",
-      'steps': "The polynomial cannot be factored with integers. Try using the Formula method instead."
-    };
-  }
-  
-  Fraction r1 = Fraction(-p, intA).simplify();
-  Fraction r2 = Fraction(-q, intA).simplify();
-  
-  String steps = "1. Standard Form: ($a)x² + ($b)x + ($c) = 0\n";
-  steps += "2. Multiply by LCM $lcmVal: ${intA}x² + ${intB}x + $intC = 0\n";
-  steps += "3. Factor by grouping: (${_getFactoredFormStatic(intA, p, q, intC)}) = 0\n";
-  steps += "4. Solve for x: x₁ = ${formatRoot(r1.doubleValue)}, x₂ = ${formatRoot(r2.doubleValue)}";
-
-  return {
-    'roots': "Roots: x₁ = ${formatRoot(r1.doubleValue)}, x₂ = ${formatRoot(r2.doubleValue)}",
-    'steps': steps
-  };
+  if (!found) return {'roots': "Not easily factorable", 'steps': "The polynomial cannot be factored with integers. Try the Formula method."};
+  Fraction r1 = Fraction(-p, intA).simplify(), r2 = Fraction(-q, intA).simplify();
+  String steps = "1. Standard Form: ($a)x² + ($b)x + ($c) = 0\n2. Multiply by LCM $lcmVal: ${intA}x² + ${intB}x + $intC = 0\n3. Factor by grouping: (${_getFactoredFormStatic(intA, p, q, intC)}) = 0\n4. Solve for x: x₁ = ${formatRoot(r1.doubleValue)}, x₂ = ${formatRoot(r2.doubleValue)}";
+  return {'roots': "Roots: x₁ = ${formatRoot(r1.doubleValue)}, x₂ = ${formatRoot(r2.doubleValue)}", 'steps': steps};
 }
 
 String _getFactoredFormStatic(int a, int p, int q, int c) {
@@ -320,6 +335,11 @@ class _Polynomial {
   Map<int, Fraction> coefficients = {};
   _Polynomial();
   _Polynomial.fromCoeff(int degree, Fraction coeff) { if (coeff.numerator != 0) coefficients[degree] = coeff; }
+  double evaluate(double x) {
+    double result = 0;
+    coefficients.forEach((degree, coeff) => result += coeff.doubleValue * math.pow(x, degree));
+    return result;
+  }
   _Polynomial add(_Polynomial other) {
     final result = _Polynomial()..coefficients.addAll(coefficients);
     other.coefficients.forEach((degree, coeff) {
@@ -354,6 +374,19 @@ class _Polynomial {
   }
 }
 
+class _RationalExpression {
+  final _Polynomial numerator;
+  final _Polynomial denominator;
+  _RationalExpression(this.numerator, this.denominator);
+  factory _RationalExpression.fromPolynomial(_Polynomial p) => _RationalExpression(p, _Polynomial.fromCoeff(0, Fraction(1, 1)));
+  _RationalExpression add(_RationalExpression other) => _RationalExpression(numerator.multiply(other.denominator).add(other.numerator.multiply(denominator)), denominator.multiply(other.denominator));
+  _RationalExpression subtract(_RationalExpression other) => _RationalExpression(numerator.multiply(other.denominator).subtract(other.numerator.multiply(denominator)), denominator.multiply(other.denominator));
+  _RationalExpression multiply(_RationalExpression other) => _RationalExpression(numerator.multiply(other.numerator), denominator.multiply(other.denominator));
+  _RationalExpression divide(_RationalExpression other) => _RationalExpression(numerator.multiply(other.denominator), denominator.multiply(other.numerator));
+  _RationalExpression negate() => _RationalExpression(numerator.negate(), denominator);
+  _RationalExpression pow(int exponent) => _RationalExpression(numerator.pow(exponent), denominator.pow(exponent));
+}
+
 class _ExpressionParser {
   final String expression;
   int pos = -1, ch = -1;
@@ -364,49 +397,45 @@ class _ExpressionParser {
     if (ch == charToEat) { nextChar(); return true; }
     return false;
   }
-  _Polynomial parse() { nextChar(); final p = parseExpression(); if (pos < expression.length) throw FormatException("Unexpected char: ${String.fromCharCode(ch)}"); return p; }
-  _Polynomial parseExpression() {
+  _RationalExpression parse() { nextChar(); final p = parseExpression(); if (pos < expression.length) throw FormatException("Unexpected character: ${String.fromCharCode(ch)}"); return p; }
+  _RationalExpression parseExpression() {
     var p = parseTerm();
     while (true) { if (eat(43)) p = p.add(parseTerm()); else if (eat(45)) p = p.subtract(parseTerm()); else return p; }
   }
-  _Polynomial parseTerm() {
+  _RationalExpression parseTerm() {
     var p = parseFactor();
     while (true) {
       if (eat(42)) p = p.multiply(parseFactor());
-      else if (eat(47)) {
-        final divisor = parseFactor();
-        if (divisor.coefficients.keys.any((d) => d != 0)) throw FormatException("Division by variable unsupported");
-        final c = divisor.coefficients[0]!;
-        final res = _Polynomial();
-        p.coefficients.forEach((deg, coeff) => res.coefficients[deg] = coeff.divide(c));
-        p = res;
-      } else if (ch == 40 || (ch >= 48 && ch <= 57) || ch == 120) p = p.multiply(parseFactor());
+      else if (eat(47)) p = p.divide(parseFactor());
+      else if (ch == 40 || (ch >= 48 && ch <= 57) || ch == 120) p = p.multiply(parseFactor());
       else return p;
     }
   }
-  _Polynomial parseFactor() {
+  _RationalExpression parseFactor() {
     if (eat(43)) return parseFactor();
     if (eat(45)) return parseFactor().negate();
-    _Polynomial p;
-    if (eat(40)) { p = parseExpression(); if (!eat(41)) throw FormatException("Missing ')'"); }
+    _RationalExpression p;
+    if (eat(40)) { p = parseExpression(); if (!eat(41)) throw FormatException("Missing closing parenthesis ')'"); }
     else if ((ch >= 48 && ch <= 57) || ch == 46) {
       int startPos = pos;
-      while ((ch >= 48 && ch <= 57) || ch == 46 || ch == 47) nextChar();
-      p = _Polynomial.fromCoeff(0, _parseTermCoefficient(expression.substring(startPos, pos)));
-    } else if (eat(120)) p = _Polynomial.fromCoeff(1, Fraction(1, 1));
-    else throw FormatException("Unexpected char: ${String.fromCharCode(ch)}");
+      while ((ch >= 48 && ch <= 57) || ch == 46) nextChar();
+      p = _RationalExpression.fromPolynomial(_Polynomial.fromCoeff(0, _parseTermCoefficient(expression.substring(startPos, pos))));
+    } else if (eat(120)) p = _RationalExpression.fromPolynomial(_Polynomial.fromCoeff(1, Fraction(1, 1)));
+    else throw FormatException("Unexpected character: ${String.fromCharCode(ch)}");
     if (eat(94)) {
-      if (p.coefficients.length > 1 || (p.coefficients.containsKey(0) && p.coefficients.length == 1)) throw FormatException("Exponentiation only on x");
       int startPos = pos;
       while (ch >= 48 && ch <= 57) nextChar();
-      p = p.pow(int.parse(expression.substring(startPos, pos)));
+      final expStr = expression.substring(startPos, pos);
+      if (expStr.isEmpty) throw FormatException("Exponent value expected after '^'");
+      p = p.pow(int.parse(expStr));
     }
     return p;
   }
   Fraction _parseTermCoefficient(String term) {
     if (term.isEmpty || term == '+') return Fraction(1, 1);
     if (term == '-') return Fraction(-1, 1);
-    if (term.contains('/')) { final parts = term.split('/'); return Fraction(int.parse(parts[0]), int.parse(parts[1])); }
-    try { return Fraction.fromDouble(double.parse(term)); } catch(e) { return Fraction(0,1); }
+    final d = double.tryParse(term);
+    if (d != null) return Fraction.fromDouble(d);
+    return Fraction(1, 1);
   }
 }
