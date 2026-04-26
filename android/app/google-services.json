@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "39911177524",
+    "project_id": "dakulator",
+    "storage_bucket": "dakulator.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:39911177524:android:942d1ad0195ee8a5d2b961",
+        "android_client_info": {
+          "package_name": "com.excentric.dakulator"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBOSKwyy2xVDkatjD0hTlT2-upltVwl8zk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

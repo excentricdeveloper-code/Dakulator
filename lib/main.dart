@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
+import 'package:firebase_core/firebase_core.dart';
 import 'equation_solver.dart';
 import 'settings_screen.dart';
 import 'utils.dart';
@@ -10,6 +11,12 @@ import 'theme_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    // You might need to pass options if you haven't run 'flutterfire configure'
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint("Firebase initialization failed: $e");
+  }
   await themeManager.loadTheme();
   runApp(const CalculatorApp());
 }
@@ -113,13 +120,13 @@ class _CalculatorHomeState extends State<CalculatorHome> {
     });
   }
 
-  void _onOperatorPress(String op) {
+  void _onOperatorPress(String text) {
     performVibration();
     setState(() {
       _justCalculated = false;
       _firstNumber = double.tryParse(_display) ?? 0;
       _display = '0';
-      _operation = op;
+      _operation = text;
       _updateCalculationText();
     });
   }
@@ -268,8 +275,8 @@ class _CalculatorHomeState extends State<CalculatorHome> {
                 onPressed: () {
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const EquationSolverScreen()));
                 },
-                style: ButtonStyle(
-                    minimumSize: const WidgetStatePropertyAll(Size(double.infinity, 50))
+                style: const ButtonStyle(
+                    minimumSize: WidgetStatePropertyAll(Size(double.infinity, 50))
                 ),
                 child: const Text('EQUATION SOLVER', style: TextStyle(fontSize: 16),),
               ),
