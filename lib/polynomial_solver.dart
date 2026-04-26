@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'utils.dart';
 import 'main.dart';
 import 'history_screen.dart';
+import 'ui_components.dart';
 
 class PolynomialSolverScreen extends StatefulWidget {
   const PolynomialSolverScreen({super.key});
@@ -98,12 +99,17 @@ class _PolynomialSolverScreenState extends State<PolynomialSolverScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('Polynomial Solver'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.history),
+            icon: const Icon(Icons.history_rounded),
             tooltip: 'History',
             onPressed: () {
               Navigator.push(
@@ -119,71 +125,150 @@ class _PolynomialSolverScreenState extends State<PolynomialSolverScreen> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: _controller,
-                      readOnly: true,
-                      showCursor: true,
-                      onTap: () => setState(() => _isKeyboardVisible = true),
-                      decoration: const InputDecoration(
-                          labelText: 'e.g. (x-1)(x-2)=0',
-                          border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _isSolving ? null : _solve,
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white),
-                        child: _isSolving
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : const Text('SOLVE'),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDarkMode 
+                ? [const Color(0xFF0F2027), const Color(0xFF203A43), const Color(0xFF2C5364)]
+                : [Colors.grey[50]!, Colors.grey[200]!],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GlassCard(
+                        opacity: isDarkMode ? 0.05 : 0.2,
+                        child: TextField(
+                          controller: _controller,
+                          readOnly: true,
+                          showCursor: true,
+                          style: const TextStyle(fontSize: 18),
+                          onTap: () => setState(() => _isKeyboardVisible = true),
+                          decoration: InputDecoration(
+                            labelText: 'Polynomial Equation',
+                            hintText: 'e.g., (x-1)(x-2)=0',
+                            labelStyle: TextStyle(color: isDarkMode ? TechColors.primary : Colors.orange),
+                            border: InputBorder.none,
+                            prefixIcon: Icon(Icons.layers_rounded, color: isDarkMode ? TechColors.primary : Colors.orange),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(_rootsText,
-                        style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange)),
-                    const Divider(color: Colors.orange),
-                    Text(_stepsText, style: const TextStyle(fontFamily: 'monospace')),
-                  ],
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _isSolving ? null : _solve,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isDarkMode ? TechColors.primary : Colors.orange,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            elevation: 4,
+                          ),
+                          child: _isSolving
+                              ? const SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : const FittedBox(child: Text('SOLVE POLYNOMIAL', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5))),
+                        ),
+                      ),
+                      if (_rootsText.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        GlassCard(
+                          opacity: isDarkMode ? 0.1 : 0.2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Roots",
+                                style: TextStyle(
+                                  fontSize: 14, 
+                                  fontWeight: FontWeight.bold, 
+                                  color: isDarkMode ? TechColors.primary : Colors.orange,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Text(
+                                  _rootsText,
+                                  style: TextStyle(
+                                    fontSize: 18, 
+                                    fontWeight: FontWeight.bold, 
+                                    color: isDarkMode ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              if (_stepsText.isNotEmpty) ...[
+                                const Divider(height: 32),
+                                Text(
+                                  "Solution Steps",
+                                  style: TextStyle(
+                                    fontSize: 12, 
+                                    fontWeight: FontWeight.bold, 
+                                    color: isDarkMode ? Colors.white54 : Colors.black54,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _stepsText,
+                                  style: TextStyle(
+                                    fontFamily: 'monospace', 
+                                    fontSize: 14,
+                                    height: 1.5,
+                                    color: isDarkMode ? Colors.white70 : Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            if (_isKeyboardVisible) _buildKeyboard(),
-          ],
+              if (_isKeyboardVisible) _buildKeyboard(),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildKeyboard() {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: Colors.black,
-      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: isDarkMode ? Colors.black87 : Colors.grey[200],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 20),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            IconButton(
-                icon: const Icon(Icons.keyboard_hide, color: Colors.white),
-                onPressed: () => setState(() => _isKeyboardVisible = false))
-          ]),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => setState(() => _isKeyboardVisible = false),
+                icon: const Icon(Icons.keyboard_hide_rounded, size: 20),
+                label: const Text('HIDE'),
+              ),
+            ],
+          ),
           _buildRow(['1', '2', '3', 'x^', 'del']),
           _buildRow(['4', '5', '6', 'x', '(']),
           _buildRow(['7', '8', '9', '=', ')']),
@@ -194,27 +279,44 @@ class _PolynomialSolverScreenState extends State<PolynomialSolverScreen> {
   }
 
   Widget _buildRow(List<String> keys) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Row(
-      children: keys
-          .map((k) => Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.grey[900],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(4))),
-                    onPressed: () => k == 'del' ? _onBackspace() : _onKeyboardPress(k),
-                    child: Text(k, style: const TextStyle(fontSize: 18)),
+      children: keys.map((k) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => k == 'del' ? _onBackspace() : _onKeyboardPress(k),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? Colors.white10 : Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: isDarkMode ? Colors.white12 : Colors.black12),
+                ),
+                child: Center(
+                  child: Text(
+                    k,
+                    style: TextStyle(
+                      fontSize: 18, 
+                      fontWeight: FontWeight.bold,
+                      color: (k == 'del' || k == 'x' || k == 'x^' || k == '=') 
+                          ? (isDarkMode ? TechColors.primary : Colors.orange)
+                          : (isDarkMode ? Colors.white : Colors.black87),
+                    ),
                   ),
                 ),
-              ))
-          .toList(),
+              ),
+            ),
+          ),
+        ),
+      )).toList(),
     );
   }
 }
+
 
 /// Top-level function for compute()
 Map<String, String> _solvePolynomialIsolate(String equation) {
@@ -533,10 +635,14 @@ class PolynomialParser {
 
   Fraction _parseNumber() {
     int start = _pos;
-    while (_isDigit(_peek) || _peek == '.') _advance();
+    while (_isDigit(_peek) || _peek == '.') {
+      _advance();
+    }
     if (_peek == '/') {
       _advance();
-      while (_isDigit(_peek)) _advance();
+      while (_isDigit(_peek)) {
+        _advance();
+      }
     }
     final s = _text.substring(start, _pos);
     if (s.isEmpty) throw FormatException("Number expected at position $_pos");

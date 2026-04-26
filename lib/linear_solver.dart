@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
 import 'utils.dart';
 import 'main.dart';
 import 'history_screen.dart';
+import 'ui_components.dart';
 
 class LinearSolverScreen extends StatefulWidget {
   const LinearSolverScreen({super.key});
@@ -20,6 +22,7 @@ class _LinearSolverScreenState extends State<LinearSolverScreen> {
   String _stepsText = '';
   String _solveMethod = 'Elimination';
   bool _isKeyboardVisible = false;
+  bool _isSolving = false;
   List<HistoryItem> _historyList = [];
 
   List<double>? _graphParams;
@@ -68,262 +71,488 @@ class _LinearSolverScreenState extends State<LinearSolverScreen> {
     }
   }
 
-  void _solve() {
+  Future<void> _solve() async {
+    if (_isSolving) return;
     performVibration();
-    String eq1 = _eq1Controller.text;
-    String eq2 = _eq2Controller.text;
+    String eq1 = _eq1Controller.text.trim();
+    String eq2 = _eq2Controller.text.trim();
 
     if (eq1.isEmpty || eq2.isEmpty) {
       setState(() => _solutionText = 'Please enter both equations');
       return;
     }
 
+    setState(() {
+      _isSolving = true;
+      _solutionText = 'Solving...';
+      _stepsText = '';
+    });
+
     try {
-      List<Fraction> coeffs1 = _parseEquation(eq1);
-      List<Fraction> coeffs2 = _parseEquation(eq2);
-
-      Fraction a1 = coeffs1[0], b1 = coeffs1[1], c1 = coeffs1[2];
-      Fraction a2 = coeffs2[0], b2 = coeffs2[1], c2 = coeffs2[2];
-
-      String result = '';
-      if (_solveMethod == 'Elimination') {
-        result = _solveByElimination(a1, b1, c1, a2, b2, c2);
-      } else if (_solveMethod == 'Substitution') {
-        result = _solveBySubstitution(a1, b1, c1, a2, b2, c2);
-      } else {
-        result = _solveByGraphing(a1, b1, c1, a2, b2, c2);
-      }
+      final result = await compute(_solveLinearIsolate, {
+        'eq1': eq1,
+        'eq2': eq2,
+        'method': _solveMethod,
+      });
 
       setState(() {
-        _solutionText = result;
-        _historyList.insert(0, HistoryItem("$eq1\n$eq2\n$result"));
-        saveHistory('linear_equation_history', _historyList);
+        _solutionText = result['solution'] ?? 'Error';
+        _stepsText = result['steps'] ?? '';
+        _graphParams = result['graphParams'] != null 
+            ? List<double>.from(result['graphParams'] as List) 
+            : null;
+        _intersection = result['intersection'] != null 
+            ? Offset((result['intersection'] as List)[0], (result['intersection'] as List)[1]) 
+            : null;
+            
+        if (_solutionText.isNotEmpty && !_solutionText.startsWith('Error') && !_solutionText.contains('Invalid')) {
+          _historyList.insert(0, HistoryItem("$eq1\n$eq2\n$_solutionText"));
+          saveHistory('linear_equation_history', _historyList);
+        }
       });
     } catch (e) {
       setState(() {
-        _solutionText = 'Invalid equation format';
-        _stepsText = '';
+        _solutionText = 'Error';
+        _stepsText = 'An unexpected error occurred: $e';
         _graphParams = null;
         _intersection = null;
       });
+    } finally {
+      setState(() => _isSolving = false);
     }
-  }
-
-  List<Fraction> _parseEquation(String equation) {
-    equation = equation.replaceAll(' ', '').toLowerCase();
-    List<String> sides = equation.split('=');
-    if (sides.length != 2) throw Exception("Invalid Equation: Must contain one '='.");
-
-    Map<String, Fraction> left = _parseSide(sides[0]);
-    Map<String, Fraction> right = _parseSide(sides[1]);
-
-    return [
-      left['x']!.subtract(right['x']!), // a
-      left['y']!.subtract(right['y']!), // b
-      right['c']!.subtract(left['c']!)  // c
-    ];
-  }
-
-  Map<String, Fraction> _parseSide(String side) {
-    Fraction x = Fraction(0, 1), y = Fraction(0, 1), c = Fraction(0, 1);
-    if (side.isEmpty) return {'x': x, 'y': y, 'c': c};
-
-    String processed = side.replaceAll('-', '+-');
-    if (processed.startsWith('+')) processed = processed.substring(1);
-    if (processed.isEmpty) return {'x': x, 'y': y, 'c': c};
-    List<String> terms = processed.split('+');
-
-    for (var term in terms) {
-      if (term.isEmpty) continue;
-      if (term.contains('x')) {
-        x = x.add(_parseCoeff(term.replaceAll('x', '')));
-      } else if (term.contains('y')) {
-        y = y.add(_parseCoeff(term.replaceAll('y', '')));
-      } else {
-        c = c.add(_parseCoeff(term));
-      }
-    }
-    return {'x': x, 'y': y, 'c': c};
-  }
-
-  Fraction _parseCoeff(String coeff) {
-    if (coeff.isEmpty || coeff == '+') return Fraction(1, 1);
-    if (coeff == '-') return Fraction(-1, 1);
-    if (coeff.contains('/')) {
-      List<String> parts = coeff.split('/');
-      return Fraction(int.parse(parts[0]), int.parse(parts[1]));
-    }
-    double? val = double.tryParse(coeff);
-    if (val != null) return Fraction.fromDouble(val);
-    return Fraction(0, 1);
-  }
-
-   String _solveByElimination(Fraction a1, Fraction b1, Fraction c1, Fraction a2, Fraction b2, Fraction c2) {
-    setState(() => _graphParams = null); // Hide graph
-    Fraction det = a1.multiply(b2).subtract(a2.multiply(b1));
-    if (det.numerator == 0) {
-      _stepsText = "The determinant is zero. No unique solution exists (lines are parallel or coincident).";
-      return "No unique solution";
-    }
-
-    Fraction x = c1.multiply(b2).subtract(c2.multiply(b1)).divide(det);
-    Fraction y = a1.multiply(c2).subtract(a2.multiply(c1)).divide(det);
-
-    String steps = "1. Given Equations:\n   Eq1: (${a1})x + (${b1})y = $c1\n   Eq2: (${a2})x + (${b2})y = $c2\n\n";
-    steps += "2. Use Cramer's Rule (Elimination):\n   x = (c₁b₂ - c₂b₁) / (a₁b₂ - a₂b₁) = $x\n";
-    steps += "   y = (a₁c₂ - a₂c₁) / (a₁b₂ - a₂b₁) = $y\n";
-
-    _stepsText = steps;
-    return "Solution: x = ${formatRoot(x.doubleValue)}, y = ${formatRoot(y.doubleValue)}";
-  }
-
-  String _solveBySubstitution(Fraction a1, Fraction b1, Fraction c1, Fraction a2, Fraction b2, Fraction c2) {
-    setState(() => _graphParams = null); // Hide graph
-    if (b1.numerator == 0 && b2.numerator == 0) {
-      _stepsText = "Cannot solve for y in either equation.";
-      return "Cannot solve by substitution";
-    }
-    
-    bool swapped = false;
-    if (b1.numerator == 0) { // If we can't solve Eq1 for y, swap them.
-      var tempA=a1; var tempB=b1; var tempC=c1; a1=a2; b1=b2; c1=c2; a2=tempA; b2=tempB; c2=tempC; 
-      swapped = true;
-    }
-
-    String steps = "1. Given Equations:\n   ${swapped ? 'Eq2' : 'Eq1'}: (${a1})x + (${b1})y = $c1\n   ${swapped ? 'Eq1' : 'Eq2'}: (${a2})x + (${b2})y = $c2\n\n";
-    steps += "2. Solve first equation for y:\n   y = ($c1 - (${a1})x) / $b1\n\n";
-    steps += "3. Substitute into second equation:\n   (${a2})x + $b2( ($c1 - (${a1})x) / $b1 ) = $c2\n\n";
-    
-    Fraction det = a1.multiply(b2).subtract(a2.multiply(b1));
-    if (det.numerator == 0) return "No unique solution";
-    
-    Fraction x = c1.multiply(b2).subtract(c2.multiply(b1)).divide(det);
-    Fraction y = c1.subtract(a1.multiply(x)).divide(b1);
-
-    steps += "4. Solve for x: x = $x\n\n";
-    steps += "5. Substitute x back to find y: y = $y";
-
-    _stepsText = steps;
-    return "Solution: x = ${formatRoot(x.doubleValue)}, y = ${formatRoot(y.doubleValue)}";
-  }
-
-  String _solveByGraphing(Fraction a1, Fraction b1, Fraction c1, Fraction a2, Fraction b2, Fraction c2) {
-    double da1 = a1.doubleValue;
-    double db1 = b1.doubleValue;
-    double dc1 = c1.doubleValue;
-    double da2 = a2.doubleValue;
-    double db2 = b2.doubleValue;
-    double dc2 = c2.doubleValue;
-
-    double det = da1 * db2 - da2 * db1;
-    _graphParams = [da1, db1, dc1, da2, db2, dc2];
-    
-    if (det.abs() < 1e-9) {
-      _intersection = null;
-      _stepsText = "The lines are parallel or coincident, so there is no unique intersection point.";
-      return "No unique solution";
-    }
-
-    double x = (dc1 * db2 - dc2 * db1) / det;
-    double y = (da1 * dc2 - da2 * dc1) / det;
-    _intersection = Offset(x, y);
-    _stepsText = "The intersection point on the graph is (${formatRoot(x)}, ${formatRoot(y)}).";
-    return "Solution: x = ${formatRoot(x)}, y = ${formatRoot(y)}";
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Linear System Solver'),
+        title: const Text('Linear Solver'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         actions: [
-          IconButton(icon: const Icon(Icons.history), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const HistoryScreen(storageKey: 'linear_equation_history', title: 'Linear History')))),
+          IconButton(
+            icon: const Icon(Icons.history_rounded), 
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const HistoryScreen(storageKey: 'linear_equation_history', title: 'Linear History')))
+          ),
         ],
       ),
-      body: SafeArea(
-        child: Column(children: [
-          Expanded(child: SingleChildScrollView(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _buildEqField(_eq1Controller, 'Equation 1: ax + by = c'),
-            const SizedBox(height: 10),
-            _buildEqField(_eq2Controller, 'Equation 2: dx + ey = f'),
-            const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: ['Elimination', 'Substitution', 'Graphing'].map((m) => Row(mainAxisSize: MainAxisSize.min, children: [
-              Radio<String>(
-                value: m, 
-                groupValue: _solveMethod, 
-                onChanged: (v) => setState(() => _solveMethod = v!),
-                activeColor: Colors.orange,
-              ), 
-              Text(m)
-            ])).toList()),
-            const SizedBox(height: 10),
-            SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _solve, style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white), child: const Text('SOLVE'))),
-            const SizedBox(height: 20),
-            Text(_solutionText, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.orange)),
-            const Divider(color: Colors.orange),
-            if (_solveMethod == 'Graphing' && _graphParams != null)
-              Column(
-                children: [
-                  GestureDetector(
-                    onScaleStart: (details) {
-                      _panStartOffset = details.localFocalPoint - _graphOffset;
-                    },
-                    onScaleUpdate: (details) {
-                      if (details.scale != 1.0) {
-                         setState(() {
-                            _graphScale *= details.scale;
-                            _graphScale = _graphScale.clamp(5.0, 150.0); // Clamp zoom level
-                         });
-                      } else if (details.pointerCount == 1 && _panStartOffset != null) {
-                         setState(() {
-                           _graphOffset = details.localFocalPoint - _panStartOffset!;
-                         });
-                      }
-                    },
-                    child: Container(
-                      height: 350, 
-                      width: double.infinity, 
-                      margin: const EdgeInsets.symmetric(vertical: 10), 
-                      decoration: BoxDecoration(border: Border.all(color: Colors.grey[700]!), color: Colors.grey[850]), 
-                      child: ClipRect(child: CustomPaint(painter: LinearGraphPainter(p: _graphParams!, intersection: _intersection, scale: _graphScale, panOffset: _graphOffset)))
-                    ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDarkMode 
+                ? [const Color(0xFF0F2027), const Color(0xFF203A43), const Color(0xFF2C5364)]
+                : [Colors.grey[50]!, Colors.grey[200]!],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20), 
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start, 
+                    children: [
+                      GlassCard(
+                        opacity: isDarkMode ? 0.05 : 0.2,
+                        child: Column(
+                          children: [
+                            _buildEqField(_eq1Controller, 'Eq 1: ax + by = c'),
+                            const Divider(height: 24, indent: 40),
+                            _buildEqField(_eq2Controller, 'Eq 2: dx + ey = f'),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      GlassCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        opacity: isDarkMode ? 0.05 : 0.1,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: ['Elimination', 'Substitution', 'Graphing'].map((m) => Padding(
+                              padding: const EdgeInsets.only(right: 8.0),
+                              child: ChoiceChip(
+                                label: Text(m), 
+                                selected: _solveMethod == m, 
+                                onSelected: (selected) => setState(() => _solveMethod = m),
+                                selectedColor: isDarkMode ? TechColors.primary.withAlpha(76) : Colors.orange.withAlpha(76),
+                              ),
+                            )).toList(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity, 
+                        child: ElevatedButton(
+                          onPressed: _isSolving ? null : _solve, 
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isDarkMode ? TechColors.primary : Colors.orange, 
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            elevation: 4,
+                          ), 
+                          child: _isSolving
+                              ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const FittedBox(child: Text('SOLVE SYSTEM', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5)))
+                        )
+                      ),
+                      if (_solutionText.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        GlassCard(
+                          opacity: isDarkMode ? 0.1 : 0.2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Solution",
+                                style: TextStyle(
+                                  fontSize: 14, 
+                                  fontWeight: FontWeight.bold, 
+                                  color: isDarkMode ? TechColors.primary : Colors.orange,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _solutionText, 
+                                style: TextStyle(
+                                  fontSize: 20, 
+                                  fontWeight: FontWeight.bold, 
+                                  color: isDarkMode ? Colors.white : Colors.black87
+                                )
+                              ),
+                              if (_solveMethod == 'Graphing' && _graphParams != null) ...[
+                                const Divider(height: 32),
+                                _buildGraphView(),
+                              ],
+                              if (_stepsText.isNotEmpty) ...[
+                                const Divider(height: 32),
+                                Text(
+                                  "Solution Steps",
+                                  style: TextStyle(
+                                    fontSize: 12, 
+                                    fontWeight: FontWeight.bold, 
+                                    color: isDarkMode ? Colors.white54 : Colors.black54,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal, 
+                                  child: Text(
+                                    _stepsText, 
+                                    style: TextStyle(
+                                      fontFamily: 'monospace', 
+                                      fontSize: 14, 
+                                      height: 1.5,
+                                      color: isDarkMode ? Colors.white70 : Colors.black87,
+                                    )
+                                  )
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const Text("Use two fingers to zoom and one finger to pan.")
-                ],
+                ),
               ),
-            SingleChildScrollView(scrollDirection: Axis.horizontal, child: Text(_stepsText, style: const TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.5))),
-          ]))),
-          if (_isKeyboardVisible) _buildKeyboard(),
-        ]),
+              if (_isKeyboardVisible) _buildKeyboard(),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  Widget _buildGraphView() {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: GestureDetector(
+            onScaleStart: (details) {
+              _panStartOffset = details.localFocalPoint - _graphOffset;
+            },
+            onScaleUpdate: (details) {
+              if (details.scale != 1.0) {
+                 setState(() {
+                    _graphScale *= details.scale;
+                    _graphScale = _graphScale.clamp(5.0, 150.0);
+                 });
+              } else if (details.pointerCount == 1 && _panStartOffset != null) {
+                 setState(() {
+                   _graphOffset = details.localFocalPoint - _panStartOffset!;
+                 });
+              }
+            },
+            child: Container(
+              height: 300, 
+              width: double.infinity, 
+              decoration: BoxDecoration(
+                color: isDarkMode ? Colors.black38 : Colors.grey[100],
+                border: Border.all(color: isDarkMode ? Colors.white10 : Colors.black12),
+              ), 
+              child: CustomPaint(
+                painter: LinearGraphPainter(
+                  p: _graphParams!, 
+                  intersection: _intersection, 
+                  scale: _graphScale, 
+                  panOffset: _graphOffset,
+                  isDarkMode: isDarkMode,
+                )
+              )
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          "Pinch to zoom • Drag to pan", 
+          style: TextStyle(fontSize: 10, color: isDarkMode ? Colors.white38 : Colors.black38),
+        )
+      ],
     );
   }
 
   Widget _buildEqField(TextEditingController controller, String hint) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return TextField(
       controller: controller,
       readOnly: true,
       showCursor: true,
+      style: const TextStyle(fontSize: 16),
       onTap: () => setState(() { _activeController = controller; _isKeyboardVisible = true; }),
-      decoration: InputDecoration(hintText: hint, border: const OutlineInputBorder(), focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.orange))),
+      decoration: InputDecoration(
+        labelText: hint, 
+        labelStyle: TextStyle(color: isDarkMode ? Colors.white60 : Colors.black54),
+        border: InputBorder.none,
+        prefixIcon: Icon(Icons.linear_scale_rounded, color: isDarkMode ? TechColors.primary : Colors.orange, size: 20),
+      ),
     );
   }
 
   Widget _buildKeyboard() {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: Colors.black, padding: const EdgeInsets.only(bottom: 10, left: 4, right: 4), child: Column(children: [
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [IconButton(icon: const Icon(Icons.keyboard_hide, color: Colors.white), onPressed: () => setState(() => _isKeyboardVisible = false))]),
-        _buildRow(['1', '2', '3', 'x', 'del']),
-        _buildRow(['4', '5', '6', 'y', '(']),
-        _buildRow(['7', '8', '9', '=', ')']),
-        _buildRow(['.', '0', '+', '-', '/']),
-      ]),
+      decoration: BoxDecoration(
+        color: isDarkMode ? Colors.black87 : Colors.grey[200],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => setState(() => _isKeyboardVisible = false),
+                icon: const Icon(Icons.keyboard_hide_rounded, size: 20),
+                label: const Text('HIDE'),
+              ),
+            ],
+          ),
+          _buildRow(['1', '2', '3', 'x', 'del']),
+          _buildRow(['4', '5', '6', 'y', '(']),
+          _buildRow(['7', '8', '9', '=', ')']),
+          _buildRow(['.', '0', '+', '-', '/']),
+        ],
+      ),
     );
   }
 
   Widget _buildRow(List<String> keys) {
-    return Row(children: keys.map((k) => Expanded(child: Padding(padding: const EdgeInsets.all(2), child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[900], foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))), onPressed: () => k == 'del' ? _onBackspace() : _onKeyboardPress(k), child: Text(k, style: const TextStyle(fontSize: 18)))) )).toList());
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    return Row(
+      children: keys.map((k) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => k == 'del' ? _onBackspace() : _onKeyboardPress(k),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? Colors.white10 : Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: isDarkMode ? Colors.white12 : Colors.black12),
+                ),
+                child: Center(
+                  child: Text(
+                    k,
+                    style: TextStyle(
+                      fontSize: 18, 
+                      fontWeight: FontWeight.bold,
+                      color: (k == 'del' || k == 'x' || k == 'y' || k == '=') 
+                          ? (isDarkMode ? TechColors.primary : Colors.orange)
+                          : (isDarkMode ? Colors.white : Colors.black87),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )).toList(),
+    );
   }
+}
+
+// Top-level function for compute()
+Map<String, dynamic> _solveLinearIsolate(Map<String, dynamic> params) {
+  String eq1 = params['eq1'];
+  String eq2 = params['eq2'];
+  String method = params['method'];
+
+  try {
+    List<Fraction> coeffs1 = _parseEquationStatic(eq1);
+    List<Fraction> coeffs2 = _parseEquationStatic(eq2);
+
+    Fraction a1 = coeffs1[0], b1 = coeffs1[1], c1 = coeffs1[2];
+    Fraction a2 = coeffs2[0], b2 = coeffs2[1], c2 = coeffs2[2];
+
+    String solution = '';
+    String steps = '';
+    List<double>? graphParams;
+    List<double>? intersection;
+
+    if (method == 'Graphing') {
+      double da1 = a1.doubleValue;
+      double db1 = b1.doubleValue;
+      double dc1 = c1.doubleValue;
+      double da2 = a2.doubleValue;
+      double db2 = b2.doubleValue;
+      double dc2 = c2.doubleValue;
+
+      double det = da1 * db2 - da2 * db1;
+      graphParams = [da1, db1, dc1, da2, db2, dc2];
+      
+      if (det.abs() < 1e-9) {
+        solution = "No unique solution";
+        steps = "The lines are parallel or coincident, so there is no unique intersection point.";
+      } else {
+        double x = (dc1 * db2 - dc2 * db1) / det;
+        double y = (da1 * dc2 - da2 * dc1) / det;
+        intersection = [x, y];
+        solution = "Solution: x = ${formatRoot(x)}, y = ${formatRoot(y)}";
+        steps = "The intersection point on the graph is (${formatRoot(x)}, ${formatRoot(y)}).";
+      }
+    } else {
+      Fraction det = a1.multiply(b2).subtract(a2.multiply(b1));
+      if (det.numerator == 0) {
+        solution = "No unique solution";
+        steps = "The determinant is zero. No unique solution exists (lines are parallel or coincident).";
+      } else {
+        if (method == 'Substitution') {
+          // Substitution logic
+          if (b1.numerator == 0 && b2.numerator == 0) {
+            solution = "Cannot solve by substitution";
+            steps = "Cannot solve for y in either equation.";
+          } else {
+            bool swapped = false;
+            Fraction sa1 = a1, sb1 = b1, sc1 = c1, sa2 = a2, sb2 = b2, sc2 = c2;
+            if (sb1.numerator == 0) {
+              sa1 = a2; sb1 = b2; sc1 = c2; sa2 = a1; sb2 = b1; sc2 = c1;
+              swapped = true;
+            }
+            steps = "1. Given Equations:\n   ${swapped ? 'Eq2' : 'Eq1'}: ($sa1)x + ($sb1)y = $sc1\n   ${swapped ? 'Eq1' : 'Eq2'}: ($sa2)x + ($sb2)y = $sc2\n\n";
+            steps += "2. Solve first equation for y:\n   y = ($sc1 - ($sa1)x) / $sb1\n\n";
+            steps += "3. Substitute into second equation:\n   ($sa2)x + $sb2( ($sc1 - ($sa1)x) / $sb1 ) = $sc2\n\n";
+            Fraction x = sc1.multiply(sb2).subtract(sc2.multiply(sb1)).divide(det);
+            Fraction y = sc1.subtract(sa1.multiply(x)).divide(sb1);
+            steps += "4. Solve for x: x = $x\n\n";
+            steps += "5. Substitute x back to find y: y = $y";
+            solution = "Solution: x = ${formatRoot(x.doubleValue)}, y = ${formatRoot(y.doubleValue)}";
+          }
+        } else {
+          // Elimination logic
+          Fraction x = c1.multiply(b2).subtract(c2.multiply(b1)).divide(det);
+          Fraction y = a1.multiply(c2).subtract(a2.multiply(c1)).divide(det);
+          steps = "1. Given Equations:\n   Eq1: ($a1)x + ($b1)y = $c1\n   Eq2: ($a2)x + ($b2)y = $c2\n\n";
+          steps += "2. Use Cramer's Rule (Elimination):\n   x = (c₁b₂ - c₂b₁) / (a₁b₂ - a₂b₁) = $x\n";
+          steps += "   y = (a₁c₂ - a₂c₁) / (a₁b₂ - a₂b₁) = $y\n";
+          solution = "Solution: x = ${formatRoot(x.doubleValue)}, y = ${formatRoot(y.doubleValue)}";
+        }
+      }
+    }
+
+    return {
+      'solution': solution,
+      'steps': steps,
+      'graphParams': graphParams,
+      'intersection': intersection,
+    };
+  } catch (e) {
+    return {
+      'solution': 'Error',
+      'steps': 'Invalid equation format or calculation error: $e',
+    };
+  }
+}
+
+List<Fraction> _parseEquationStatic(String equation) {
+  equation = equation.replaceAll(' ', '').toLowerCase();
+  List<String> sides = equation.split('=');
+  if (sides.length != 2) throw Exception("Equation must contain exactly one '='.");
+
+  Map<String, Fraction> left = _parseSideStatic(sides[0]);
+  Map<String, Fraction> right = _parseSideStatic(sides[1]);
+
+  return [
+    left['x']!.subtract(right['x']!), // a
+    left['y']!.subtract(right['y']!), // b
+    right['c']!.subtract(left['c']!)  // c
+  ];
+}
+
+Map<String, Fraction> _parseSideStatic(String side) {
+  Fraction x = Fraction(0, 1), y = Fraction(0, 1), c = Fraction(0, 1);
+  if (side.isEmpty) return {'x': x, 'y': y, 'c': c};
+
+  String processed = side.replaceAll('-', '+-');
+  if (processed.startsWith('+')) processed = processed.substring(1);
+  if (processed.isEmpty) return {'x': x, 'y': y, 'c': c};
+  List<String> terms = processed.split('+');
+
+  for (var term in terms) {
+    if (term.isEmpty) continue;
+    if (term.contains('x')) {
+      x = x.add(_parseCoeffStatic(term.replaceAll('x', '')));
+    } else if (term.contains('y')) {
+      y = y.add(_parseCoeffStatic(term.replaceAll('y', '')));
+    } else {
+      c = c.add(_parseCoeffStatic(term));
+    }
+  }
+  return {'x': x, 'y': y, 'c': c};
+}
+
+Fraction _parseCoeffStatic(String coeff) {
+  if (coeff.isEmpty || coeff == '+') return Fraction(1, 1);
+  if (coeff == '-') return Fraction(-1, 1);
+  if (coeff.contains('/')) {
+    List<String> parts = coeff.split('/');
+    if (parts.length == 2) {
+      int? n = int.tryParse(parts[0]);
+      int? d = int.tryParse(parts[1]);
+      if (n != null && d != null && d != 0) return Fraction(n, d);
+    }
+  }
+  double? val = double.tryParse(coeff);
+  if (val != null) return Fraction.fromDouble(val);
+  return Fraction(0, 1);
 }
 
 class LinearGraphPainter extends CustomPainter {
@@ -331,17 +560,24 @@ class LinearGraphPainter extends CustomPainter {
   final Offset? intersection;
   final double scale;
   final Offset panOffset;
+  final bool isDarkMode;
 
-  LinearGraphPainter({required this.p, this.intersection, required this.scale, required this.panOffset});
+  LinearGraphPainter({
+    required this.p, 
+    this.intersection, 
+    required this.scale, 
+    required this.panOffset,
+    required this.isDarkMode,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final gridPaint = Paint()..color = Colors.grey.withOpacity(0.4)..strokeWidth = 0.5..isAntiAlias = true;
-    final axisPaint = Paint()..color = Colors.grey[500]!..strokeWidth = 1..isAntiAlias = true;
-    final line1Paint = Paint()..color = Colors.blueAccent..strokeWidth = 2.5..isAntiAlias = true..style = PaintingStyle.stroke;
-    final line2Paint = Paint()..color = Colors.redAccent..strokeWidth = 2.5..isAntiAlias = true..style = PaintingStyle.stroke;
-    final pointPaint = Paint()..color = Colors.orangeAccent..style = PaintingStyle.fill..isAntiAlias = true;
-    final textStyle = TextStyle(color: Colors.grey[400], fontSize: 10);
+    final gridPaint = Paint()..color = (isDarkMode ? Colors.white12 : Colors.black12)..strokeWidth = 0.5..isAntiAlias = true;
+    final axisPaint = Paint()..color = (isDarkMode ? Colors.white30 : Colors.black38)..strokeWidth = 1.2..isAntiAlias = true;
+    final line1Paint = Paint()..color = TechColors.primary..strokeWidth = 3..isAntiAlias = true..style = PaintingStyle.stroke;
+    final line2Paint = Paint()..color = Colors.orangeAccent..strokeWidth = 3..isAntiAlias = true..style = PaintingStyle.stroke;
+    final pointPaint = Paint()..color = Colors.redAccent..style = PaintingStyle.fill..isAntiAlias = true;
+    final textStyle = TextStyle(color: isDarkMode ? Colors.white38 : Colors.black38, fontSize: 10);
 
     final origin = Offset(size.width / 2, size.height / 2) + panOffset;
 
@@ -361,7 +597,7 @@ class LinearGraphPainter extends CustomPainter {
       final screenIntersection = Offset(origin.dx + intersection!.dx * scale, origin.dy - intersection!.dy * scale);
       if (screenIntersection.dx > 0 && screenIntersection.dx < size.width && screenIntersection.dy > 0 && screenIntersection.dy < size.height) {
           canvas.drawCircle(screenIntersection, 6, pointPaint);
-          _drawIntersectionLabel(canvas, size, screenIntersection, intersection!, textStyle.copyWith(color: Colors.orangeAccent, backgroundColor: Colors.black.withOpacity(0.6)));
+          _drawIntersectionLabel(canvas, size, screenIntersection, intersection!, textStyle.copyWith(color: Colors.orangeAccent, backgroundColor: Colors.black.withAlpha(153)));
       }
     }
   }
@@ -436,16 +672,16 @@ class LinearGraphPainter extends CustomPainter {
       path.moveTo(0, screenY); path.lineTo(size.width, screenY);
     } else {
       // y = (c - ax) / b
-      double x1_real = (0 - origin.dx) / scale;
-      double y1_real = (c - a * x1_real) / b;
-      double y1_screen = origin.dy - y1_real * scale;
+      double x1Real = (0 - origin.dx) / scale;
+      double y1Real = (c - a * x1Real) / b;
+      double y1Screen = origin.dy - y1Real * scale;
 
-      double x2_real = (size.width - origin.dx) / scale;
-      double y2_real = (c - a * x2_real) / b;
-      double y2_screen = origin.dy - y2_real * scale;
+      double x2Real = (size.width - origin.dx) / scale;
+      double y2Real = (c - a * x2Real) / b;
+      double y2Screen = origin.dy - y2Real * scale;
 
-      path.moveTo(0, y1_screen);
-      path.lineTo(size.width, y2_screen);
+      path.moveTo(0, y1Screen);
+      path.lineTo(size.width, y2Screen);
     }
     canvas.drawPath(path, paint);
   }
@@ -480,5 +716,5 @@ class LinearGraphPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant LinearGraphPainter old) => p != old.p || intersection != old.intersection || scale != old.scale || panOffset != old.panOffset;
+  bool shouldRepaint(covariant LinearGraphPainter old) => p != old.p || intersection != old.intersection || scale != old.scale || panOffset != old.panOffset || isDarkMode != old.isDarkMode;
 }

@@ -4,11 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 enum ThemeSetting { light, dark, system }
 
 class ThemeManager extends ValueNotifier<ThemeMode> {
-  ThemeManager() : super(ThemeMode.system);
+  ThemeManager() : super(ThemeMode.dark);
 
   Future<void> loadTheme() async {
     final prefs = await SharedPreferences.getInstance();
-    final themeIndex = prefs.getInt('theme_setting') ?? ThemeSetting.system.index;
+    final themeIndex = prefs.getInt('theme_setting') ?? ThemeSetting.dark.index;
     final themeSetting = ThemeSetting.values[themeIndex];
     value = _getThemeMode(themeSetting);
   }

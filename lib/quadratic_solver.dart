@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'main.dart';
 import 'utils.dart';
 import 'history_screen.dart';
+import 'ui_components.dart';
 
 class QuadraticSolverScreen extends StatefulWidget {
   const QuadraticSolverScreen({super.key});
@@ -106,12 +107,17 @@ class _QuadraticSolverScreenState extends State<QuadraticSolverScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('Quadratic Solver'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.history),
+            icon: const Icon(Icons.history_rounded),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const HistoryScreen(storageKey: 'quadratic_history', title: 'Quadratic History')),
@@ -119,71 +125,226 @@ class _QuadraticSolverScreenState extends State<QuadraticSolverScreen> {
           )
         ],
       ),
-      body: SafeArea(
-        child: Column(children: [
-          Expanded(child: SingleChildScrollView(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            TextField(controller: _equationController, readOnly: true, showCursor: true, decoration: const InputDecoration(labelText: 'Equation (e.g., x^2-x-6=0)', border: OutlineInputBorder()), onTap: () => setState(() => _isKeyboardVisible = true)),
-            const SizedBox(height: 16),
-            Row(children: [
-              const Text('Method:'),
-              Radio<String>(
-                value: 'Formula',
-                groupValue: _solveMethod,
-                onChanged: (v) => setState(() => _solveMethod = v!),
-                activeColor: Colors.orange,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDarkMode 
+                ? [const Color(0xFF0F2027), const Color(0xFF203A43), const Color(0xFF2C5364)]
+                : [Colors.grey[50]!, Colors.grey[200]!],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GlassCard(
+                        opacity: isDarkMode ? 0.05 : 0.2,
+                        child: TextField(
+                          controller: _equationController,
+                          readOnly: true,
+                          showCursor: true,
+                          style: const TextStyle(fontSize: 18),
+                          decoration: InputDecoration(
+                            labelText: 'Equation',
+                            hintText: 'e.g., x^2-x-6=0',
+                            labelStyle: TextStyle(color: isDarkMode ? TechColors.primary : Colors.orange),
+                            border: InputBorder.none,
+                            prefixIcon: Icon(Icons.functions_rounded, color: isDarkMode ? TechColors.primary : Colors.orange),
+                          ),
+                          onTap: () => setState(() => _isKeyboardVisible = true),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      GlassCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        opacity: isDarkMode ? 0.05 : 0.1,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              Text('Method:', style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? Colors.white70 : Colors.black87)),
+                              const SizedBox(width: 16),
+                              ChoiceChip(
+                                label: const Text('Formula'),
+                                selected: _solveMethod == 'Formula',
+                                onSelected: (selected) => setState(() => _solveMethod = 'Formula'),
+                                selectedColor: isDarkMode ? TechColors.primary.withAlpha(76) : Colors.orange.withAlpha(76),
+                              ),
+                              const SizedBox(width: 8),
+                              ChoiceChip(
+                                label: const Text('Factoring'),
+                                selected: _solveMethod == 'Factorization',
+                                onSelected: (selected) => setState(() => _solveMethod = 'Factorization'),
+                                selectedColor: isDarkMode ? TechColors.primary.withAlpha(76) : Colors.orange.withAlpha(76),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _isSolving ? null : _solve,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isDarkMode ? TechColors.primary : Colors.orange,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            elevation: 4,
+                          ),
+                          child: _isSolving
+                              ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const FittedBox(child: Text('CALCULATE ROOTS', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5))),
+                        ),
+                      ),
+                      if (_rootsText.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        GlassCard(
+                          opacity: isDarkMode ? 0.1 : 0.2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Result",
+                                style: TextStyle(
+                                  fontSize: 14, 
+                                  fontWeight: FontWeight.bold, 
+                                  color: isDarkMode ? TechColors.primary : Colors.orange,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Text(
+                                  _rootsText,
+                                  style: TextStyle(
+                                    fontSize: 20, 
+                                    fontWeight: FontWeight.bold, 
+                                    color: isDarkMode ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              if (_stepsText.isNotEmpty) ...[
+                                const Divider(height: 32),
+                                Text(
+                                  "Solution Steps",
+                                  style: TextStyle(
+                                    fontSize: 12, 
+                                    fontWeight: FontWeight.bold, 
+                                    color: isDarkMode ? Colors.white54 : Colors.black54,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _stepsText,
+                                  style: TextStyle(
+                                    fontFamily: 'monospace', 
+                                    fontSize: 14,
+                                    height: 1.5,
+                                    color: isDarkMode ? Colors.white70 : Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-              const Text('Formula'),
-              Radio<String>(
-                value: 'Factorization',
-                groupValue: _solveMethod,
-                onChanged: (v) => setState(() => _solveMethod = v!),
-                activeColor: Colors.orange,
-              ),
-              const Text('Factorization')
-            ]),
-            SizedBox(
-              width: double.infinity, 
-              child: ElevatedButton(
-                onPressed: _isSolving ? null : _solve, 
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white), 
-                child: _isSolving 
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
-                  : const Text('SOLVE')
-              )
-            ),
-            const SizedBox(height: 24),
-            Text(_rootsText, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.orange)),
-            const Divider(color: Colors.orange),
-            Text(_stepsText, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
-          ]))),
-          if (_isKeyboardVisible) _buildCustomKeyboard(),
-        ]),
+              if (_isKeyboardVisible) _buildCustomKeyboard(),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildCustomKeyboard() {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: Colors.black, padding: const EdgeInsets.all(4), child: Column(children: [
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [IconButton(icon: const Icon(Icons.keyboard_hide, color: Colors.white), onPressed: () => setState(() => _isKeyboardVisible = false))]),
-        _buildKeyboardRow(['1', '2', '3', 'x', 'del']),
-        _buildKeyboardRow(['4', '5', '6', '^', 'x²']),
-        _buildKeyboardRow(['7', '8', '9', '+', '-']),
-        _buildKeyboardRow(['.', '0', '/', '(', ')', '=']),
-      ]),
+      decoration: BoxDecoration(
+        color: isDarkMode ? Colors.black87 : Colors.grey[200],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => setState(() => _isKeyboardVisible = false),
+                icon: const Icon(Icons.keyboard_hide_rounded, size: 20),
+                label: const Text('HIDE'),
+              ),
+            ],
+          ),
+          _buildKeyboardRow(['1', '2', '3', 'x', 'del']),
+          _buildKeyboardRow(['4', '5', '6', '^', 'x²']),
+          _buildKeyboardRow(['7', '8', '9', '+', '-']),
+          _buildKeyboardRow(['.', '0', '/', '(', ')', '=']),
+        ],
+      ),
     );
   }
 
   Widget _buildKeyboardRow(List<String> keys) {
-    return Row(children: keys.map((key) => Expanded(child: Padding(padding: const EdgeInsets.all(2), child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[900], foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))), onPressed: () {
-      if (key == 'del') {
-        _onBackspace();
-      } else if (key == 'x²') {
-        _onKeyboardPress('^2');
-      } else {
-        _onKeyboardPress(key);
-      }
-    }, child: Text(key, style: const TextStyle(fontSize: 18)))) )).toList());
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    return Row(
+      children: keys.map((key) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                if (key == 'del') {
+                  _onBackspace();
+                } else if (key == 'x²') {
+                  _onKeyboardPress('^2');
+                } else {
+                  _onKeyboardPress(key);
+                }
+              },
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? Colors.white10 : Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: isDarkMode ? Colors.white12 : Colors.black12),
+                ),
+                child: Center(
+                  child: Text(
+                    key,
+                    style: TextStyle(
+                      fontSize: 18, 
+                      fontWeight: FontWeight.bold,
+                      color: (key == 'del' || key == 'x²' || key == '^' || key == '=') 
+                          ? (isDarkMode ? TechColors.primary : Colors.orange)
+                          : (isDarkMode ? Colors.white : Colors.black87),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )).toList(),
+    );
   }
 }
 
@@ -218,7 +379,7 @@ Map<String, String> _solveQuadraticIsolate(Map<String, dynamic> params) {
         if (finalDenom.evaluate(root).abs() < 1e-9) {
           return {'roots': "No solution", 'steps': "The potential solution x = ${formatRoot(root)} makes the denominator zero."};
         }
-        return {'roots': "Roots: x = ${formatRoot(root)}", 'steps': "Equation simplifies to a linear form: (${b})x + ($c) = 0"};
+        return {'roots': "Roots: x = ${formatRoot(root)}", 'steps': "Equation simplifies to a linear form: ($b)x + ($c) = 0"};
       }
       return {'roots': "Not a quadratic equation.", 'steps': "Equation simplifies to degree $maxDegree (must be 2)."};
     }
@@ -302,7 +463,10 @@ Map<String, String> _solveByFactorizationCore(Fraction a, Fraction b, Fraction c
   int p = 0, q = 0;
   bool found = false;
   int absAc = ac.abs();
-  if (absAc > 1000000) return _solveByFormulaCore(a, b, c)..['steps'] = "Note: Coefficients too large for factorization. Using formula.\n\n" + _solveByFormulaCore(a, b, c)['steps']!;
+  if (absAc > 1000000) {
+    final formulaResult = _solveByFormulaCore(a, b, c);
+    return formulaResult..['steps'] = "Note: Coefficients too large for factorization. Using formula.\n\n${formulaResult['steps']!}";
+  }
   for (int i = 1; i * i <= absAc; i++) {
     if (absAc % i == 0) {
       int f1 = i, f2 = absAc ~/ i;
@@ -323,7 +487,11 @@ String _getFactoredFormStatic(int a, int p, int q, int c) {
   int g1 = _gcd(a.abs(), p.abs());
   int f1A = a ~/ g1, f1P = p ~/ g1;
   int g2 = _gcd(q.abs(), c.abs());
-  if (q < 0) g2 = -g2.abs(); else g2 = g2.abs();
+  if (q < 0) {
+    g2 = -g2.abs();
+  } else {
+    g2 = g2.abs();
+  }
   return "(${_formatTermStatic(g1, "x")} + $g2)(${_formatTermStatic(f1A, "x")} + $f1P)";
 }
 
@@ -369,7 +537,9 @@ class _Polynomial {
     if (exponent < 0) throw Exception("Negative exponents not supported");
     if (exponent == 0) return _Polynomial.fromCoeff(0, Fraction(1, 1));
     _Polynomial result = this;
-    for (int i = 1; i < exponent; i++) result = result.multiply(this);
+    for (int i = 1; i < exponent; i++) {
+      result = result.multiply(this);
+    }
     return result;
   }
 }
@@ -393,8 +563,13 @@ class _ExpressionParser {
   _ExpressionParser(this.expression);
   void nextChar() => ch = (++pos < expression.length) ? expression.codeUnitAt(pos) : -1;
   bool eat(int charToEat) {
-    while (ch == 32) nextChar();
-    if (ch == charToEat) { nextChar(); return true; }
+    while (ch == 32) {
+      nextChar();
+    }
+    if (ch == charToEat) {
+      nextChar();
+      return true;
+    }
     return false;
   }
   _RationalExpression parse() { nextChar(); final p = parseExpression(); if (pos < expression.length) throw FormatException("Unexpected character: ${String.fromCharCode(ch)}"); return p; }

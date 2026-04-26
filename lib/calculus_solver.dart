@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
 import 'utils.dart';
 import 'main.dart';
 import 'history_screen.dart';
+import 'ui_components.dart';
 
 // --- UI Layer ---
 
@@ -18,6 +20,7 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
   String _resultText = '';
   String _stepsText = '';
   bool _isKeyboardVisible = false;
+  bool _isSolving = false;
   List<HistoryItem> _historyList = [];
 
   @override
@@ -57,7 +60,8 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
     }
   }
 
-  void _performCalculus(bool isDifferentiation) {
+  Future<void> _performCalculus(bool isDifferentiation) async {
+    if (_isSolving) return;
     performVibration();
     String expression = _controller.text.trim();
     if (expression.isEmpty) {
@@ -65,45 +69,52 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
       return;
     }
 
+    setState(() {
+      _isSolving = true;
+      _resultText = 'Solving...';
+      _stepsText = '';
+    });
+
     try {
-      final result = solveCalculus(expression, isDifferentiation);
+      final result = await compute(_solveCalculusIsolate, {
+        'expression': expression,
+        'isDifferentiation': isDifferentiation,
+      });
+
       setState(() {
-        _resultText = result.resultDisplay;
-        _stepsText = result.steps;
-        _historyList.insert(
-            0,
-            HistoryItem(
-                "${isDifferentiation ? 'd/dx' : '∫'}($expression) = ${result.resultDisplay}"));
-        saveHistory('calculus_history', _historyList);
+        _resultText = result['result'] ?? 'Error';
+        _stepsText = result['steps'] ?? '';
+        if (!_resultText.startsWith('Error')) {
+          _historyList.insert(
+              0,
+              HistoryItem(
+                  "${isDifferentiation ? 'd/dx' : '∫'}($expression) = $_resultText"));
+          saveHistory('calculus_history', _historyList);
+        }
       });
     } catch (e) {
       setState(() {
-        String errorMessage = e.toString();
-        if (e is UnsupportedError) {
-          errorMessage =
-              "The calculus engine does not support this expression yet.";
-          final message = e.message ?? "";
-          if (message.contains("is not supported")) {
-            errorMessage =
-                "Integration or differentiation for '${message.split("'")[1]}' is not supported.";
-          }
-        } else if (e is FormatException) {
-          errorMessage = "Invalid format: ${e.message}";
-        }
-        _resultText = "Error: $errorMessage";
+        _resultText = "Error: An unexpected error occurred: $e";
         _stepsText = "";
       });
+    } finally {
+      setState(() => _isSolving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('Calculus Solver'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.history),
+            icon: const Icon(Icons.history_rounded),
             onPressed: () {
               Navigator.push(
                 context,
@@ -118,82 +129,162 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextField(
-                      controller: _controller,
-                      readOnly: true,
-                      showCursor: true,
-                      onTap: () => setState(() => _isKeyboardVisible = true),
-                      decoration: const InputDecoration(
-                        labelText: 'f(x) = ...',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                              onPressed: () => _performCalculus(true),
-                              child: const Text('DIFFERENTIATE')),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDarkMode 
+                ? [const Color(0xFF0F2027), const Color(0xFF203A43), const Color(0xFF2C5364)]
+                : [Colors.grey[50]!, Colors.grey[200]!],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      GlassCard(
+                        opacity: isDarkMode ? 0.05 : 0.2,
+                        child: TextField(
+                          controller: _controller,
+                          readOnly: true,
+                          showCursor: true,
+                          style: const TextStyle(fontSize: 18),
+                          onTap: () => setState(() => _isKeyboardVisible = true),
+                          decoration: InputDecoration(
+                            labelText: 'Function f(x)',
+                            hintText: 'e.g., x^2 + sin(x)',
+                            labelStyle: TextStyle(color: isDarkMode ? TechColors.primary : Colors.orange),
+                            border: InputBorder.none,
+                            prefixIcon: Icon(Icons.show_chart_rounded, color: isDarkMode ? TechColors.primary : Colors.orange),
+                          ),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton(
-                              onPressed: () => _performCalculus(false),
-                              child: const Text('INTEGRATE')),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _isSolving ? null : () => _performCalculus(true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isDarkMode ? TechColors.primary : Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: _isSolving
+                                  ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                  : const FittedBox(child: Text('DIFFERENTIATE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _isSolving ? null : () => _performCalculus(false),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isDarkMode ? TechColors.primary : Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: _isSolving
+                                  ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                  : const FittedBox(child: Text('INTEGRATE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_resultText.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        GlassCard(
+                          opacity: isDarkMode ? 0.1 : 0.2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Result",
+                                style: TextStyle(
+                                  fontSize: 14, 
+                                  fontWeight: FontWeight.bold, 
+                                  color: isDarkMode ? TechColors.primary : Colors.orange,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Text(
+                                  _resultText,
+                                  style: TextStyle(
+                                    fontSize: 20, 
+                                    fontWeight: FontWeight.bold, 
+                                    color: isDarkMode ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              if (_stepsText.isNotEmpty) ...[
+                                const Divider(height: 32),
+                                Text(
+                                  "Solution Steps",
+                                  style: TextStyle(
+                                    fontSize: 12, 
+                                    fontWeight: FontWeight.bold, 
+                                    color: isDarkMode ? Colors.white54 : Colors.black54,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _stepsText,
+                                  style: TextStyle(
+                                    fontFamily: 'monospace', 
+                                    fontSize: 14,
+                                    height: 1.5,
+                                    color: isDarkMode ? Colors.white70 : Colors.black87,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 24),
-                    const Text("Result:",
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold)),
-                    Text(_resultText,
-                        style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange)),
-                    const SizedBox(height: 16),
-                    const Text("Steps:",
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold)),
-                    const Divider(color: Colors.orange, thickness: 1),
-                    Text(_stepsText,
-                        style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 14,
-                            height: 1.5)),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            if (_isKeyboardVisible) _buildKeyboard(),
-          ],
+              if (_isKeyboardVisible) _buildKeyboard(),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildKeyboard() {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: isDarkMode ? Colors.black87 : Colors.grey[200],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 20),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            IconButton(
-                icon: const Icon(Icons.keyboard_hide),
-                onPressed: () => setState(() => _isKeyboardVisible = false))
-          ]),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.keyboard_hide_rounded),
+                onPressed: () => setState(() => _isKeyboardVisible = false),
+              ),
+            ],
+          ),
           _buildRow(['sin', 'cos', 'tan', 'sec']),
           _buildRow(['ln', 'e', '√', '^']),
           _buildRow(['x', 'y', '(', ')']),
@@ -207,32 +298,80 @@ class _CalculusSolverScreenState extends State<CalculusSolverScreen> {
   }
 
   Widget _buildRow(List<String> keys) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     const functionKeys = ['sin', 'cos', 'tan', 'sec', 'ln'];
 
     return Row(
-      children: keys
-          .map((k) => Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+      children: keys.map((k) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                if (k == 'del') {
+                  _onBackspace();
+                } else if (k == '√') {
+                  _onKeyboardPress('sqrt(');
+                } else {
+                  _onKeyboardPress(functionKeys.contains(k) ? '$k(' : k);
+                }
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? Colors.white10 : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: isDarkMode ? Colors.white12 : Colors.black12),
+                ),
+                child: Center(
+                  child: Text(
+                    k,
+                    style: TextStyle(
+                      fontSize: 16, 
+                      fontWeight: FontWeight.bold,
+                      color: (k == 'del' || k == 'dx' || functionKeys.contains(k)) 
+                          ? (isDarkMode ? TechColors.primary : Colors.orange)
+                          : (isDarkMode ? Colors.white : Colors.black87),
                     ),
-                    onPressed: () {
-                      if (k == 'del') {
-                        _onBackspace();
-                      } else if (k == '√') {
-                        _onKeyboardPress('sqrt(');
-                      } else {
-                        _onKeyboardPress(functionKeys.contains(k) ? '$k(' : k);
-                      }
-                    },
-                    child: Text(k, style: const TextStyle(fontSize: 18)),
                   ),
                 ),
-              ))
-          .toList(),
+              ),
+            ),
+          ),
+        ),
+      )).toList(),
     );
+  }
+}
+
+// --- Calculus Isolate ---
+
+Map<String, String> _solveCalculusIsolate(Map<String, dynamic> params) {
+  String expression = params['expression'];
+  bool isDifferentiation = params['isDifferentiation'];
+  try {
+    final result = solveCalculus(expression, isDifferentiation);
+    return {
+      'result': result.resultDisplay,
+      'steps': result.steps,
+    };
+  } catch (e) {
+    String errorMessage = e.toString();
+    if (e is UnsupportedError) {
+      errorMessage = "The calculus engine does not support this expression yet.";
+      final message = e.message ?? "";
+      if (message.contains("is not supported")) {
+        errorMessage = "Integration or differentiation for '${message.split("'")[1]}' is not supported.";
+      }
+    } else if (e is FormatException) {
+      errorMessage = "Invalid format: ${e.message}";
+    }
+    return {
+      'result': "Error: $errorMessage",
+      'steps': "",
+    };
   }
 }
 
@@ -451,14 +590,16 @@ class BinaryOp extends Expression {
   Expression integrate(String varName, StringBuffer steps) {
     final originalInfix = toInfixString();
     final simplified = simplify();
-     if (!simplified.equals(this)) {
+    if (simplified is! BinaryOp) {
+      if (!simplified.equals(this)) {
         steps.writeln("   • Simplify: ∫$originalInfix d$varName = ∫${simplified.toInfixString()} d$varName");
-        return simplified.integrate(varName, steps);
+      }
+      return simplified.integrate(varName, steps);
     }
 
-    final sLeft = (simplified as BinaryOp).left;
-    final sRight = (simplified as BinaryOp).right;
-    final sOp = (simplified as BinaryOp).op;
+    final sLeft = simplified.left;
+    final sRight = simplified.right;
+    final sOp = simplified.op;
 
     if (sOp == '+' || sOp == '-') {
       steps.writeln("   • Apply Linearity Rule:");
@@ -493,17 +634,17 @@ class BinaryOp extends Expression {
     }
 
     if (sOp == '^' && sRight is Constant) {
-      final n = (sRight as Constant).value;
+      final n = sRight.value;
       if (n != -1) {
           final linearCoeffs = sLeft.getLinearCoefficients(varName);
           if (linearCoeffs != null) {
               final a = linearCoeffs.a;
               final b = linearCoeffs.b;
               if (a != 0) {
-                 final n_plus_1 = n + 1;
+                 final nPlus1 = n + 1;
                  final result = BinaryOp(
-                     BinaryOp(sLeft, Constant(n_plus_1), '^'),
-                     Constant(a * n_plus_1),
+                     BinaryOp(sLeft, Constant(nPlus1), '^'),
+                     Constant(a * nPlus1),
                      '/'
                  );
                  steps.writeln("   • Apply Power Rule for Linear Argument: ∫(ax+b)^n dx = (ax+b)^(n+1)/(a*(n+1))");
@@ -564,7 +705,7 @@ class BinaryOp extends Expression {
       if (right.isZero()) return Constant(1);
       if (left.isOne()) return Constant(1);
       if (left.isZero()) return Constant(0);
-      if (left is BinaryOp && left == '^') {
+      if (left is BinaryOp && (left as BinaryOp).op == '^') {
         return BinaryOp(left, BinaryOp(left, right, '*'), '^').simplify();
       }
     }
